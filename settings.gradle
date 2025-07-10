@@ -29,7 +29,7 @@ dependencyResolutionManagement {
         }
     }
 }
-rootProject.name = "FFMpegDemo"
+rootProject.name = "FFMpegDplayer"
 include ':libutils'
 include ':libbase'
 include ':libpng'

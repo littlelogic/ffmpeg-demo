@@ -3,6 +3,7 @@ package com.xyq.ffmpegdemo
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.util.Log
@@ -13,6 +14,8 @@ import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.content.PermissionChecker
 import androidx.core.content.res.ResourcesCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -69,6 +72,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private val permissionLauncher = registerForActivityResult<Array<String>, Map<String, Boolean>>(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        for ((key, value) in result) {
+            println("key= $key and value= $value")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -84,19 +95,85 @@ class MainActivity : AppCompatActivity() {
 
         // preload video thumbnail
         mMediaFilePath = getDemoVideoPath()
-        fetchVideoThumbnail(mMediaFilePath)
+        mMediaFilePath = "/sdcard/11_media/2-h265.mp4";
+        checkPermissionAndRunNext(kotlinx.coroutines.Runnable {
+            fetchVideoThumbnail(mMediaFilePath)
+        })
 
         val text = CommonUtils.generateTextBitmap("雪月清的随笔", 16f, applicationContext)
         mBinding.ivWatermark.setImageBitmap(text)
+
+    }
+
+    private fun checkPermissionAndRunNext(run: Runnable?) {
+        var havePermission = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_MEDIA_IMAGES
+            ) == PermissionChecker.PERMISSION_GRANTED
+                    || ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_MEDIA_VIDEO
+            ) == PermissionChecker.PERMISSION_GRANTED)
+        ) {
+            println("Full access on Android 13 (API level 33) or higher")
+            havePermission = true
+        } else if (Build.VERSION.SDK_INT >= 34 &&
+            ContextCompat.checkSelfPermission(
+                this,
+                "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+            ) == PermissionChecker.PERMISSION_GRANTED
+        ) {
+            println("Partial access on Android 14 (API level 34) or higher")
+            havePermission = true
+        } else if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PermissionChecker.PERMISSION_GRANTED
+        ) {
+            println("Full access up to Android 12 (API level 32)")
+            havePermission = true
+        } else {
+            println("Access denied")
+            havePermission = false
+        }
+        println("MainActivity--checkPermissionAndRunNext havePermission："+havePermission)
+        if (havePermission) {
+            run?.run()
+        } else {
+            if (Build.VERSION.SDK_INT >= 34) {
+                permissionLauncher.launch(
+                    arrayOf<String>(
+                        Manifest.permission.READ_MEDIA_IMAGES,
+                        Manifest.permission.READ_MEDIA_VIDEO
+                    )
+                )
+            } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.TIRAMISU) {
+                permissionLauncher.launch(
+                    arrayOf<String>(
+                        Manifest.permission.READ_MEDIA_IMAGES,
+                        Manifest.permission.READ_MEDIA_VIDEO
+                    )
+                )
+            } else {
+                permissionLauncher.launch(arrayOf<String>(Manifest.permission.READ_EXTERNAL_STORAGE))
+            }
+        }
     }
 
     override fun onResume() {
         Log.i(TAG, "onResume: filepath: $mMediaFilePath, isVideo: $mIsVideo")
         super.onResume()
-        if (mHasPermission) {
+        /*if (mHasPermission) {
             checkMediaFileValid(mMediaFilePath, mIsVideo)
             startPlay(mMediaFilePath, mIsVideo)
-        }
+        }*/
+        ///读取缩略图触发的问题
+        checkPermissionAndRunNext(kotlinx.coroutines.Runnable {
+            checkMediaFileValid(mMediaFilePath, mIsVideo)
+            startPlay(mMediaFilePath, mIsVideo)
+        })
     }
 
     override fun onPause() {
