@@ -40,3 +40,6 @@ include ':libcamerakit'
 include ':libmediapicker'
 include ':app'
 include ':libjpeg'
+
+include ':PermissionX'
+

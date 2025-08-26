@@ -45,6 +45,8 @@ dependencies {
     implementation project(path: ':librender')
     implementation project(path: ':libhwplayer')
     implementation project(path: ':libffplayer')
+//    implementation project(path: ':PermissionX')
+
 
     implementation libs.coreKtx
     implementation libs.appcompat
