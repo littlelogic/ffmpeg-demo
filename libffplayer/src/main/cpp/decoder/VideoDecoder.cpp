@@ -177,12 +177,17 @@ int VideoDecoder::decode(AVPacket *avPacket) {
         start = getCurrentTimeMs();
         // avcodec_receive_frame的-11，表示需要发新帧
         receiveRes = avcodec_receive_frame(mCodecContext, mAvFrame);
+        if (receiveRes == 0) {
+            LOGI("2592p2w3 [video] avcodec_receive_frame-ok avPacket->pts: %ld  mAvFrame->pts: %" PRId64,
+                 avPacket->pts,mAvFrame->pts)
+        }
 
         if (isEof && receiveRes != AVERROR_EOF && mRetryReceiveCount >= 0) {
             mNeedResent = true;
             mRetryReceiveCount--;
             LOGE("[video] send eof, not receive eof...retry count: %" PRId64, mRetryReceiveCount)
         }
+
 
         if (receiveRes != 0) {
             LOGE("[video] avcodec_receive_frame err: %d, resent: %d, retry count: %" PRId64, receiveRes, mNeedResent, mRetryReceiveCount)
@@ -200,8 +205,8 @@ int VideoDecoder::decode(AVPacket *avPacket) {
             break;
         }
 
-        auto ptsMs = mAvFrame->pts * av_q2d(mFtx->streams[getStreamIndex()]->time_base) * 1000;
-        LOGI("[video] avcodec_receive_frame...pts: %" PRId64 ", time: %f, format: %d, need retry: %d", mAvFrame->pts, ptsMs, mAvFrame->format, mNeedResent)
+//        auto ptsMs = mAvFrame->pts * av_q2d(mFtx->streams[getStreamIndex()]->time_base) * 1000;
+//        LOGI("[video] avcodec_receive_frame...pts: %" PRId64 ", time: %f, format: %d, need retry: %d", mAvFrame->pts, ptsMs, mAvFrame->format, mNeedResent)
         int64_t receivePoint = getCurrentTimeMs() - start;
 
         updateTimestamp(mAvFrame);

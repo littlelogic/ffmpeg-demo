@@ -4,7 +4,7 @@ class PlayerConfig {
 
     enum class DecodeConfig {
         USE_HW_DECODER,    // media codec
-        USE_FF_HW_DECODER, // media codec via ffmpeg
+        USE_FF_HW_DECODER, // media codec via ffmpeg <Hardware>
         USE_FF_SW_DECODER  // ffmpeg software decoder
     }
 

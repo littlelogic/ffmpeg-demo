@@ -557,7 +557,9 @@ void FFMpegPlayer::doRender(JNIEnv *env, AVFrame *avFrame) {
 
         env->DeleteLocalRef(rgb24);
     } else if (avFrame->format == AV_PIX_FMT_MEDIACODEC) {
-        av_mediacodec_release_buffer((AVMediaCodecBuffer *)avFrame->data[3], 1);
+        int result =  av_mediacodec_release_buffer((AVMediaCodecBuffer *)avFrame->data[3], 1);
+//        int result =  av_mediacodec_release_buffer((AVMediaCodecBuffer *)avFrame->data[3], 0);
+        LOGI("[video] 2592p2w3 av_mediacodec_release_buffer result:%d",result)
     } else if (avFrame->format == AV_SAMPLE_FMT_FLTP) {
         int dataSize = mAudioDecoder->mDataSize;
         bool flushRender = mAudioDecoder->mNeedFlushRender;

@@ -9,6 +9,7 @@ static int64_t getCurrentTimeMs() {
     return time.tv_sec * 1000.0 + time.tv_usec / 1000.0;
 }
 
+/// 是否为偶数
 static bool isEven(int num) {
     return (num & 1) == 0;
 }

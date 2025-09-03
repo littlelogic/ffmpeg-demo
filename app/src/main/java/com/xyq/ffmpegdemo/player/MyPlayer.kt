@@ -208,7 +208,10 @@ class MyPlayer(private val mContext: Context,
 
         val st = (drawer as OesDrawer).getSurfaceTexture()
         st.setOnFrameAvailableListener {
-            Log.d(TAG, "setOnFrameAvailableListener")
+            Log.d(TAG, "2592p2w3-setOnFrameAvailableListener "
+                    +" currentThread:"+ Thread.currentThread()
+                    +" timestamp:"+ st.timestamp
+            )
             mGlSurfaceView.requestRender()
         }
         mSurface = Surface(st)
