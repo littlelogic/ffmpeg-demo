@@ -43,7 +43,7 @@ bool VideoDecoder::prepare() {
         case AV_CODEC_ID_H264:
             mediacodecName = "h264_mediacodec";
             break;
-        case AV_CODEC_ID_HEVC:
+        case AV_CODEC_ID_HEVC: ///H.265 ，等同：AV_CODEC_ID_H265
             mediacodecName = "hevc_mediacodec";
             break;
         default:
@@ -51,6 +51,8 @@ bool VideoDecoder::prepare() {
             LOGE("format(%d) not support hw decode, maybe rebuild ffmpeg so", params->codec_id)
             break;
     }
+
+    // 这个兼容性的判断需要完善
     if (useHwDecoder && (params->format != AV_PIX_FMT_YUV420P && params->format != AV_PIX_FMT_YUV420P10LE)) {
         useHwDecoder = false;
         LOGE("force use sw decoder for format: %s", av_get_pix_fmt_name(AVPixelFormat(params->format)))

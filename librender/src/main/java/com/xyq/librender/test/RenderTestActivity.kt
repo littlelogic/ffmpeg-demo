@@ -32,7 +32,7 @@ class RenderTestActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         setContentView(R.layout.activity_render_test)
         Log.i(TAG, "onCreate: ")
 
-        mGLSurfaceView = findViewById(R.id.gl_surface_view)
+        mGLSurfaceView = findViewById(R.id.glSurfaceView)
         mGLSurfaceView.setEGLContextClientVersion(3)
         mGLSurfaceView.setRenderer(this)
         mGLSurfaceView.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
