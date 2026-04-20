@@ -1,3 +1,13 @@
+/**
+ * @file AudioDecoder.cpp
+ * @brief 音频解码器实现
+ *
+ * 解码流程：
+ *   1. prepare(): 查找解码器 → 初始化上下文 → 配置重采样器
+ *   2. decode():  发送 packet → 接收 frame → 重采样 → 回调
+ *   3. 重采样输出: 统一为 44100Hz / 立体声 / S16 格式
+ */
+
 #include "AudioDecoder.h"
 #include "header/Logger.h"
 #include "header/CommonUtils.h"
@@ -11,6 +21,16 @@ AudioDecoder::~AudioDecoder() {
     release();
 }
 
+/**
+ * @brief 准备音频解码器
+ * @details 流程：
+ *   1. 查找音频解码器
+ *   2. 初始化编码上下文
+ *   3. 打开解码器
+ *   4. 配置音频重采样器（SwrContext）
+ *      - 输出: 44100Hz, 立体声(Stereo), S16 格式
+ *      - 输入: 原始采样率, 原始声道布局, 原始格式
+ */
 bool AudioDecoder::prepare() {
     AVCodecParameters *params = mFtx->streams[getStreamIndex()]->codecpar;
 
@@ -75,6 +95,15 @@ bool AudioDecoder::prepare() {
     return ret == 0;
 }
 
+/**
+ * @brief 解码音频数据包
+ * @details 流程：
+ *   1. avcodec_send_packet: 发送编码包
+ *   2. avcodec_receive_frame: 接收解码帧
+ *   3. resample: 重采样为统一格式
+ *   4. updateTimestamp: 更新时间戳
+ *   5. 回调 OnFrameArrived
+ */
 int AudioDecoder::decode(AVPacket *avPacket) {
     int64_t start = getCurrentTimeMs();
     int sendRes = avcodec_send_packet(mCodecContext, avPacket);
@@ -125,6 +154,12 @@ int AudioDecoder::decode(AVPacket *avPacket) {
     return receiveRes;
 }
 
+/**
+ * @brief 音频重采样
+ * @details 将解码帧从原始格式转换为 44100Hz / 立体声 / S16 格式
+ * @param frame 解码后的音频帧
+ * @return 输出的采样数，失败返回负值
+ */
 int AudioDecoder::resample(AVFrame *frame) {
     int out_nb = (int) av_rescale_rnd(frame->nb_samples, 44100, frame->sample_rate, AV_ROUND_UP);
     int out_channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);

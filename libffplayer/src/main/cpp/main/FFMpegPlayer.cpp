@@ -1,3 +1,16 @@
+/**
+ * @file FFMpegPlayer.cpp
+ * @brief 播放器核心引擎实现
+ *
+ * 核心架构：三线程模型（生产者-消费者模式）
+ *   - ReadPacketThread:  读包线程（生产者）→ 读取 AVPacket 分发到队列
+ *   - VideoDecodeThread: 视频解码线程（消费者）→ 解码、同步、渲染
+ *   - AudioDecodeThread: 音频解码线程（消费者）→ 解码、重采样、同步
+ *
+ * 播放流程:
+ *   init() → prepare() → start() → [playing] ⇄ [pause] → stop()
+ */
+
 #include "FFMpegPlayer.h"
 #include "../vendor/nlohmann/json.hpp"
 
@@ -12,6 +25,10 @@ FFMpegPlayer::~FFMpegPlayer() {
     LOGI("~FFMpegPlayer")
 }
 
+/**
+ * @brief 初始化 JNI 回调上下文
+ * @details 获取 Java 层 FFPlayer 对象的方法 ID，后续用于 Native → Java 回调
+ */
 void FFMpegPlayer::init(JNIEnv *env, jobject thiz) {
     jclass jclazz = env->GetObjectClass(thiz);
     if (jclazz == nullptr) {
@@ -29,9 +46,20 @@ void FFMpegPlayer::init(JNIEnv *env, jobject thiz) {
     mPlayerJni.onPlayProgress = env->GetMethodID(jclazz, "onNative_playProgress", "(D)V");
 }
 
+/**
+ * @brief 准备播放器
+ * @details 完整的准备流程：
+ *   1. 注册 JVM 到 FFmpeg（用于 MediaCodec 硬件解码）
+ *   2. 分配 AVFormatContext 并打开媒体文件
+ *   3. 查找视频/音频流索引
+ *   4. 初始化视频解码器（优先硬件加速，失败则降级软解）
+ *   5. 初始化音频解码器（含重采样器）
+ *   6. 创建视频/音频解码线程
+ *   7. 回调 Java 层通知准备完成
+ */
 bool FFMpegPlayer::prepare(JNIEnv *env, std::string &path, jobject surface) {
     mPath = path;
-    // step0: register jvm to ffmpeg for mediacodec decoding
+    // step0: 注册 JVM 到 FFmpeg，使 MediaCodec 硬件解码可用
     if (mJvm == nullptr) {
         env->GetJavaVM(&mJvm);
     }
@@ -131,6 +159,10 @@ bool FFMpegPlayer::prepare(JNIEnv *env, std::string &path, jobject surface) {
     return prepared;
 }
 
+/**
+ * @brief 开始播放
+ * @details 创建并启动读包线程 ReadPacketThread
+ */
 void FFMpegPlayer::start() {
     LOGI("FFMpegPlayer::start, state: %d", mPlayerState)
     if (mPlayerState != PlayerState::PREPARE) {  // prepared failed
@@ -142,6 +174,10 @@ void FFMpegPlayer::start() {
     }
 }
 
+/**
+ * @brief 恢复播放
+ * @details 恢复状态为 PLAYING，修复时间戳并唤醒等待的线程
+ */
 void FFMpegPlayer::resume() {
     updatePlayerState(PlayerState::PLAYING);
     if(mVideoDecoder) {
@@ -153,10 +189,22 @@ void FFMpegPlayer::resume() {
     mMutexObj->wakeUp();
 }
 
+/**
+ * @brief 暂停播放
+ */
 void FFMpegPlayer::pause() {
     updatePlayerState(PlayerState::PAUSE);
 }
 
+/**
+ * @brief 停止播放
+ * @details 完整的停止流程：
+ *   1. 设置状态为 STOP，唤醒所有等待线程
+ *   2. 等待读包线程结束 (join)
+ *   3. 清空视频队列，等待视频解码线程结束
+ *   4. 清空音频队列，等待音频解码线程结束
+ *   5. 释放 AVFormatContext
+ */
 void FFMpegPlayer::stop() {
     LOGI("FFMpegPlayer::stop")
     // wakeup read packet thread and release it
@@ -211,6 +259,14 @@ void FFMpegPlayer::stop() {
     }
 }
 
+/**
+ * @brief 读包线程主循环
+ * @details 工作流程：
+ *   - 循环调用 av_read_frame() 读取 AVPacket
+ *   - 根据流索引将 packet 分发到视频/音频队列
+ *   - 处理暂停（wait）和 Seek（等待 Seek 完成）
+ *   - 读到文件末尾时发送 flush packet 通知解码器
+ */
 void FFMpegPlayer::ReadPacketLoop() {
     LOGI("FFMpegPlayer::ReadPacketLoop start")
     while (mPlayerState != PlayerState::STOP) {
@@ -254,6 +310,13 @@ void FFMpegPlayer::ReadPacketLoop() {
     LOGI("FFMpegPlayer::ReadPacketLoop end")
 }
 
+/**
+ * @brief 读取一个 AVPacket 并分发到对应队列
+ * @details
+ *   - 成功读取：根据 stream_index 推入视频或音频队列
+ *   - 读取失败（EOF）：向两个队列发送 flush packet（size=0, data=nullptr）
+ * @return 成功返回 0，EOF 或错误返回 -1
+ */
 int FFMpegPlayer::readAvPacketToQueue() {
     AVPacket *avPacket = av_packet_alloc();
     int ret = av_read_frame(mFtx, avPacket);
@@ -293,6 +356,11 @@ int FFMpegPlayer::readAvPacketToQueue() {
     return ret;
 }
 
+/**
+ * @brief 将 AVPacket 推入指定队列
+ * @details 如果队列已满，阻塞等待 10ms 直到有空间
+ *          如果正在 Seek，丢弃 packet
+ */
 bool FFMpegPlayer::pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVPacketQueue>& queue) const {
     if (queue == nullptr) {
         return false;
@@ -312,6 +380,18 @@ bool FFMpegPlayer::pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVP
     return suc;
 }
 
+/**
+ * @brief 视频解码线程主循环
+ * @details 工作流程：
+ *   1. AttachCurrentThread（非主线程需要 attach 到 JVM）
+ *   2. 设置帧到达回调（解码帧 → 滤镜处理 → 音视频同步 → 渲染）
+ *   3. 循环从队列取包并解码：
+ *      - 检测 Seek 请求：清空队列、执行 Seek、唤醒读包线程
+ *      - 等待新 packet 到达
+ *      - 解码并处理 EAGAIN 重发
+ *      - EOF 时触发播放完成
+ *   4. DetachCurrentThread
+ */
 void FFMpegPlayer::VideoDecodeLoop() {
     if (mVideoDecoder == nullptr || mVideoPacketQueue == nullptr) {
         return;
@@ -395,6 +475,13 @@ void FFMpegPlayer::VideoDecodeLoop() {
     LOGE("[video] DetachCurrentThread");
 }
 
+/**
+ * @brief 音频解码线程主循环
+ * @details 与视频解码线程类似，但：
+ *   - 不做滤镜处理
+ *   - 播放完成以音频 EOF 为准（有音轨时）
+ *   - 回调播放进度
+ */
 void FFMpegPlayer::AudioDecodeLoop() {
     if (mAudioDecoder == nullptr || mAudioPacketQueue == nullptr) {
         return;
@@ -465,6 +552,16 @@ void FFMpegPlayer::AudioDecodeLoop() {
     LOGE("[audio] DetachCurrentThread");
 }
 
+/**
+ * @brief 处理行对齐的数据拷贝
+ * @details AVFrame 的 linesize 可能大于实际宽度（行对齐），需要逐行拷贝去除 padding
+ * @param component 目标 Java 字节数组
+ * @param width 实际宽度
+ * @param height 行数
+ * @param lineStride AVFrame 的行字节数（可能含 padding）
+ * @param pixelStride 每像素字节数
+ * @param src 源数据指针
+ */
 void FFMpegPlayer::checkStrideAndFill(JNIEnv *env, jbyteArray *component, int width, int height,
                                       int lineStride, int pixelStride, uint8_t *src) {
     int lineLength = width * pixelStride;
@@ -479,6 +576,17 @@ void FFMpegPlayer::checkStrideAndFill(JNIEnv *env, jbyteArray *component, int wi
     }
 }
 
+/**
+ * @brief 渲染帧数据
+ * @details 根据 AVFrame 的像素格式进行不同处理：
+ *
+ *   YUV420P    → 分离 Y/U/V 三个平面 → 回调 Java（FMT_VIDEO_YUV420）
+ *   NV12       → 分离 Y/UV 两个平面  → 回调 Java（FMT_VIDEO_NV12）
+ *   RGBA       → 直接传递 RGBA 数据   → 回调 Java（FMT_VIDEO_RGBA）
+ *   RGB24      → 直接传递 RGB 数据    → 回调 Java（FMT_VIDEO_RGB）
+ *   MEDIACODEC → av_mediacodec_release_buffer() → 直接渲染到 Surface
+ *   FLTP(音频) → 重采样后的 PCM 数据  → 回调 Java
+ */
 void FFMpegPlayer::doRender(JNIEnv *env, AVFrame *avFrame) {
     if (avFrame->format == AV_PIX_FMT_YUV420P) {
         if (!avFrame->data[0] || !avFrame->data[1] || !avFrame->data[2]) {
@@ -594,6 +702,15 @@ double FFMpegPlayer::getDuration() {
     return 0;
 }
 
+/**
+ * @brief Seek 到指定位置
+ * @details Seek 协调流程：
+ *   1. 设置 mIsSeek 标志
+ *   2. 设置视频/音频 Seek 目标位置
+ *   3. 清空视频/音频包队列
+ *   4. 视频/音频解码线程检测到 Seek 位置后执行实际 Seek
+ *   5. Seek 完成后唤醒读包线程继续读包
+ */
 bool FFMpegPlayer::seek(double timeS) {
     LOGI("seek to: %f, player state: %d", timeS, mPlayerState)
     mIsSeek = true;
@@ -608,6 +725,10 @@ bool FFMpegPlayer::seek(double timeS) {
     return true;
 }
 
+/**
+ * @brief 更新播放器状态
+ * @details 状态变化时打印日志
+ */
 void FFMpegPlayer::updatePlayerState(PlayerState state) {
     if (mPlayerState != state) {
         LOGI("updatePlayerState from %d to %d", mPlayerState, state);
@@ -628,6 +749,13 @@ void FFMpegPlayer::onPlayCompleted(JNIEnv *env) {
     }
 }
 
+/**
+ * @brief 获取媒体信息
+ * @details 返回 JSON 格式的媒体元数据，包含：
+ *   - path: 文件路径
+ *   - video: 视频信息（宽高、编码、时长、旋转角度、宽高比等）
+ *   - audio: 音频信息（采样率、声道、编码等）
+ */
 void FFMpegPlayer::getMediaInfo(std::string &info) {
     nlohmann::json j;
     j["path"] = mPath;

@@ -1,3 +1,14 @@
+/**
+ * @file FFConverter.h
+ * @brief FFmpeg 枚举类型转换工具
+ *
+ * 功能说明：
+ * - 将自定义枚举（CompileSettings 中的类型）转换为 FFmpeg 对应的枚举值
+ * - getAvMediaType: MediaType → AVMediaType
+ * - getAvPixelFormat: PixelFormat → AVPixelFormat
+ * - getAvCodecID: ENCODE_TYPE → AVCodecID
+ */
+
 //
 // Created by 雪月清的随笔 on 14/6/23.
 //

@@ -1,6 +1,7 @@
-//
-// Created by 雪月清的随笔 on 2023/4/18.
-//
+/**
+ * @file MutexObj.cpp
+ * @brief 互斥锁 + 条件变量封装实现
+ */
 
 #include "MutexObj.h"
 

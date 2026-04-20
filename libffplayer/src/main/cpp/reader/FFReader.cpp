@@ -1,3 +1,15 @@
+/**
+ * @file FFReader.cpp
+ * @brief AVPacket 读取器基类实现
+ *
+ * 核心功能：
+ * - init(): 打开媒体文件
+ * - selectTrack(): 选择视频或音频轨道并初始化解码器
+ * - fetchAvPacket(): 读取下一个 AVPacket（过滤指定流）
+ * - seek(): Seek 到指定时间位置
+ * - getKeyFrameIndex(): 查找关键帧索引
+ */
+
 #include "FFReader.h"
 #include "header/Logger.h"
 

@@ -1,3 +1,14 @@
+/**
+ * @file AVPacketQueue.cpp
+ * @brief 线程安全的 AVPacket 队列实现
+ *
+ * 实现细节：
+ * - push/pop/popTo 操作均加锁保护
+ * - wait 支持无限等待和超时等待（pthread_cond_timedwait）
+ * - clear 会释放队列中所有 AVPacket 的内存
+ * - popTo 处理了 flush packet（size=0, data=nullptr）的特殊情况
+ */
+
 #include "AVPacketQueue.h"
 #include <ctime>
 #include "header/Logger.h"
@@ -119,4 +130,3 @@ void AVPacketQueue::clear() {
     pthread_mutex_unlock(&mMutex);
     notify();
 }
-

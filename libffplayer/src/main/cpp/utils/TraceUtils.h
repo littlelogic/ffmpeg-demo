@@ -3,7 +3,21 @@
 //
 
 /**
- * https://developer.android.com/topic/performance/tracing/custom-events-native?hl=zh-cn
+ * @file TraceUtils.h
+ * @brief Android Systrace 性能追踪工具
+ *
+ * 功能说明：
+ * - 封装 Android ATrace API，用于在 Systrace 中标记代码段
+ * - 使用 ATRACE_CALL() 宏自动标记当前函数
+ * - ScopedTrace 利用 RAII 模式自动管理 begin/end
+ *
+ * 使用方式：
+ *   void myFunc() {
+ *       ATRACE_CALL();  // 自动标记函数名
+ *       // ... 业务代码
+ *   }
+ *
+ * @see https://developer.android.com/topic/performance/tracing/custom-events-native
  */
 
 #ifndef FFMPEGDEMO_TRACEUTILS_H

@@ -1,3 +1,14 @@
+/**
+ * @file FFFilter.cpp
+ * @brief FFmpeg AVFilter 滤镜封装实现
+ *
+ * 滤镜处理流程：
+ *   1. init(): 构建滤镜图（filter graph）
+ *      buffer source → 滤镜链（如 drawgrid）→ buffer sink
+ *   2. process(): 输入 AVFrame → 滤镜处理 → 输出 AVFrame
+ *   3. release(): 释放滤镜图和相关资源
+ */
+
 //
 // Created by 雪月清的随笔 on 14/5/23.
 //

@@ -1,3 +1,14 @@
+/**
+ * @file FFMpegUtils.cpp
+ * @brief FFmpeg 工具函数 JNI 实现
+ *
+ * 功能说明：
+ * - getVideoFramesCore: 批量抽帧（精准/快速模式），支持缩放和旋转
+ * - nativeExportGif: 将视频导出为 GIF 动画
+ *
+ * 对应 Java 类: com.xyq.libffplayer.utils.FFMpegUtils
+ */
+
 #include <jni.h>
 #include <memory.h>
 #include "../reader/FFVideoReader.h"
@@ -6,6 +17,20 @@
 #include "ScopedUtfChars.h"
 #include "ScopedPrimitiveArray.h"
 
+/**
+ * @brief 批量视频抽帧
+ * @details 工作流程：
+ *   1. 初始化 FFVideoReader（设置丢帧策略 DISCARD_NONREF）
+ *   2. 计算输出尺寸（等比缩放）
+ *   3. 回调 Java 获取时间戳数组
+ *   4. 遍历时间戳，逐帧提取并回调 Java
+ *
+ * @param path 视频文件路径
+ * @param width 目标宽度（<=0 自适应）
+ * @param height 目标高度（<=0 自适应）
+ * @param precise 是否精准抽帧
+ * @param cb Java 回调对象
+ */
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_xyq_libffplayer_utils_FFMpegUtils_getVideoFramesCore(JNIEnv *env, jobject thiz,
@@ -81,6 +106,17 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_getVideoFramesCore(JNIEnv *env, jobje
     env->CallVoidMethod(cb, onFetchEnd);
 }
 
+/**
+ * @brief 导出 GIF 动画
+ * @details 工作流程：
+ *   1. 初始化 FFVideoReader（设置丢帧策略 DISCARD_NONKEY，只读关键帧）
+ *   2. 初始化 FFVideoWriter（GIF 编码，10fps）
+ *   3. 循环读帧 → 编码 → 写入
+ *   4. 写入尾部信息
+ *
+ * @param video_path 输入视频路径
+ * @param output 输出 GIF 路径
+ */
 extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeExportGif(JNIEnv *env, jobject thiz,

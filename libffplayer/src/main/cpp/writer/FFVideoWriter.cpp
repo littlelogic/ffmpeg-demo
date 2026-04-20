@@ -1,3 +1,16 @@
+/**
+ * @file FFVideoWriter.cpp
+ * @brief 视频编码输出器实现
+ *
+ * 编码输出流程：
+ *   1. init(): 初始化输出格式、编码器、流信息，写入文件头
+ *   2. encode(): 格式转换（swsScale）→ 编码（avcodec_send_frame）→ 写入（av_interleaved_write_frame）
+ *   3. signalEof(): 刷新编码器缓冲，写入文件尾（av_write_trailer）
+ *   4. release(): 释放所有资源
+ *
+ * 支持编码格式：H.264、GIF
+ */
+
 //
 // Created by 雪月清的随笔 on 14/5/23.
 //

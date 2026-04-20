@@ -1,3 +1,15 @@
+/**
+ * @file FFReader.h
+ * @brief AVPacket 读取器基类
+ *
+ * 功能说明：
+ * - 封装 FFmpeg 的媒体文件读取功能
+ * - 支持选择视频/音频轨道
+ * - 支持 Seek、关键帧索引查询
+ * - 支持丢帧策略（DISCARD_NONREF/DISCARD_NONKEY）
+ * - FFVideoReader 继承此类用于视频抽帧
+ */
+
 #ifndef FFMPEGDEMO_FFREADER_H
 #define FFMPEGDEMO_FFREADER_H
 

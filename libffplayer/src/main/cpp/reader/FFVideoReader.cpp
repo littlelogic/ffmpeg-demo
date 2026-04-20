@@ -1,3 +1,15 @@
+/**
+ * @file FFVideoReader.cpp
+ * @brief 视频帧读取器实现
+ *
+ * 核心功能：
+ * - getFrame(): 精准/快速抽帧，支持缩放和格式转换
+ *   - YUV420P → ABGR（使用 libyuv，高性能）
+ *   - 其他格式 → RGBA（使用 libswscale）
+ * - getNextFrame(): 逐帧读取（用于 GIF 导出等场景）
+ * - getRotate(): 获取视频旋转角度（从 metadata 或 displaymatrix）
+ */
+
 #include "FFVideoReader.h"
 #include "header/Logger.h"
 #include "header/CommonUtils.h"
