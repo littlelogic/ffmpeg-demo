@@ -665,6 +665,8 @@ void FFMpegPlayer::doRender(JNIEnv *env, AVFrame *avFrame) {
 
         env->DeleteLocalRef(rgb24);
     } else if (avFrame->format == AV_PIX_FMT_MEDIACODEC) {
+        /// 传 1 是“显示这帧”；如果传 0，通常是仅释放不显示（你代码里也有注释掉的 0 版本）
+        /// release = 归还解码器输出槽位；render=1 = 同时提交给 Surface 显示
         int result =  av_mediacodec_release_buffer((AVMediaCodecBuffer *)avFrame->data[3], 1);
 //        int result =  av_mediacodec_release_buffer((AVMediaCodecBuffer *)avFrame->data[3], 0);
         LOGI("[video] 2592p2w3 av_mediacodec_release_buffer result:%d",result)

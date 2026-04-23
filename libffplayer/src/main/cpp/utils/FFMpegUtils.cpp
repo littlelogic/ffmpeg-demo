@@ -82,6 +82,7 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_getVideoFramesCore(JNIEnv *env, jobje
     LOGI("video size: %dx%d, get frame size: %dx%d", videoWidth, videoHeight, width, height)
 
     auto timestamps = (jdoubleArray)env->CallObjectMethod(cb, onFetchStart, reader->getDuration());
+    /// RAII 包装器，安全访问 Java double 数组
     ScopedDoubleArrayRW tsArr(env, timestamps);
     int size = env->GetArrayLength(timestamps);
     LOGI("timestamps size: %d", size)
@@ -89,8 +90,10 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_getVideoFramesCore(JNIEnv *env, jobje
     int rotate = reader->getRotate();
 
     for (int i = 0; i < size; i++) {
+        /// 分配（一般是 ByteBuffer.allocateDirect(...)）,只有此种，在c++中才可以方法
         jobject jByteBuffer = env->CallObjectMethod(thiz, allocateFrame, width, height);
         auto *buffer = (uint8_t *)env->GetDirectBufferAddress(jByteBuffer);
+        /// 在这块已有内存上清零，不分配内存。
         memset(buffer, 0, width * height * 4);
         reader->getFrame((int64_t)tsArr[i], width, height, buffer, precise);
         jboolean abort = !env->CallBooleanMethod(cb, onProgress, jByteBuffer, (jdouble)tsArr[i], width, height, rotate, i);
