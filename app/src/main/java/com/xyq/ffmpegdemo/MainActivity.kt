@@ -76,7 +76,7 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         for ((key, value) in result) {
-            println("key= $key and value= $value")
+            println("MainActivity- key= $key and value= $value")
         }
     }
 
@@ -118,7 +118,7 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.READ_MEDIA_VIDEO
             ) == PermissionChecker.PERMISSION_GRANTED)
         ) {
-            println("Full access on Android 13 (API level 33) or higher")
+            println("MainActivity-checkPermissionAndRunNex- Full access on Android 13 (API level 33) or higher")
             havePermission = true
         } else if (Build.VERSION.SDK_INT >= 34 &&
             ContextCompat.checkSelfPermission(
@@ -126,24 +126,25 @@ class MainActivity : AppCompatActivity() {
                 "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
             ) == PermissionChecker.PERMISSION_GRANTED
         ) {
-            println("Partial access on Android 14 (API level 34) or higher")
+            println("MainActivity-checkPermissionAndRunNex- Partial access on Android 14 (API level 34) or higher")
             havePermission = true
         } else if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.READ_EXTERNAL_STORAGE
             ) == PermissionChecker.PERMISSION_GRANTED
         ) {
-            println("Full access up to Android 12 (API level 32)")
+            println("MainActivity-checkPermissionAndRunNex- Full access up to Android 12 (API level 32)")
             havePermission = true
         } else {
-            println("Access denied")
+            println("MainActivity-checkPermissionAndRunNex- Access denied")
             havePermission = false
         }
-        println("MainActivity--checkPermissionAndRunNext havePermission："+havePermission)
+        println("MainActivity-checkPermissionAndRunNext havePermission："+havePermission)
         if (havePermission) {
             run?.run()
         } else {
             if (Build.VERSION.SDK_INT >= 34) {
+                println("MainActivity-checkPermissionAndRunNext sdk：>= 34")
                 permissionLauncher.launch(
                     arrayOf<String>(
                         Manifest.permission.READ_MEDIA_IMAGES,
@@ -151,6 +152,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 )
             } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.TIRAMISU) {
+                println("MainActivity-checkPermissionAndRunNext sdk == 33")
                 permissionLauncher.launch(
                     arrayOf<String>(
                         Manifest.permission.READ_MEDIA_IMAGES,
@@ -158,6 +160,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 )
             } else {
+                println("MainActivity-checkPermissionAndRunNext sdk：== else")
                 permissionLauncher.launch(arrayOf<String>(Manifest.permission.READ_EXTERNAL_STORAGE))
             }
         }
