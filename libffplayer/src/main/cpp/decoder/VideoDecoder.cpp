@@ -287,7 +287,7 @@ int VideoDecoder::decode(AVPacket *avPacket) {
     int receiveCount = 0;
     do {
         start = getCurrentTimeMs();
-        // avcodec_receive_frame 的 -11，表示需要发新帧
+        // avcodec_receive_frame 的 -11，表示需要发新帧，需要累计需要的数据，才能继续解码
         receiveRes = avcodec_receive_frame(mCodecContext, mAvFrame);
         if (receiveRes == 0) {
             LOGI("2592p2w3 [video] avcodec_receive_frame-ok avPacket->pts: %ld  mAvFrame->pts: %" PRId64,
@@ -457,13 +457,27 @@ void VideoDecoder::updateTimestamp(AVFrame *frame) {
     }
 
     // ====== 第二步：从帧中提取 PTS（Presentation Time Stamp） ======
-    int64_t pts = 0;
+    /*int64_t pts = 0;
     // 优先使用 DTS（Decoding Time Stamp），如果不可用则使用 PTS
     if (frame->pkt_dts != AV_NOPTS_VALUE) {
         pts = frame->pkt_dts;
     } else if (frame->pts != AV_NOPTS_VALUE) {
         pts = frame->pts;
+    }*/
+    int64_t pts = 0;
+    if (frame->pts != AV_NOPTS_VALUE) {
+        pts = frame->pts;  // 优先用显示时间戳（正确的音视频同步）
+    } else if (frame->pkt_dts != AV_NOPTS_VALUE) {
+        pts = frame->pkt_dts;  // 降级方案（某些格式没有 PTS）
+    } else {
+        // 如果都没有，使用帧号估算（最后的保险）
+        pts = frame->coded_picture_number;
     }
+    LOGD("[video] updateTimestamp: pts=%ld, dts=%ld",
+         (frame->pts != AV_NOPTS_VALUE ? frame->pts : -1),
+         (frame->pkt_dts != AV_NOPTS_VALUE ? frame->pkt_dts : -1));
+
+
 
     // ====== 第三步：时间戳转换（秒 -> 毫秒） ======
     // av_q2d() 函数将有理数转为浮点数
