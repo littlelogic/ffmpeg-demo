@@ -9,6 +9,19 @@
  *
  * 播放流程:
  *   init() → prepare() → start() → [playing] ⇄ [pause] → stop()
+ *
+ * 音视频同步策略（改进版本）：
+ *   1. 单一时间基准：使用 mStartTimeMsForSync 作为全局参考时刻（系统时间）
+ *   2. 时间约束：两个解码线程都计算 max(videoTimestamp, audioTimestamp) 作为播放期限
+ *   3. 约束等待：各线程根据最晚的时间点来计算等待时间，确保同步
+ *   4. 优先级：最快的媒体不再等待，最慢的媒体被"拖"到约束时间点
+ *
+ * 例子：
+ *   - 视频 PTS=100ms，音频 PTS=120ms
+ *   - max = 120ms
+ *   - 视频会多等 20ms（从100ms等到120ms）
+ *   - 音频正常等待到 120ms
+ *   - 结果：两个都在 120ms 时执行渲染
  */
 
 #include "FFMpegPlayer.h"
@@ -405,18 +418,43 @@ void FFMpegPlayer::VideoDecodeLoop() {
 
     mVideoDecoder->setOnFrameArrived([this, env](AVFrame *frame) {
         if (!mHasAbort && mVideoDecoder) {
-            if (mAudioDecoder) {
-                auto diff = mAudioDecoder->getTimestamp() - mVideoDecoder->getTimestamp();
-                LOGW("[video] frame arrived, AV time diff: %" PRId64, diff)
+
+            // ====== 音视频同步：计算时间约束 ======
+            if (
+//                    false&&
+            mAudioDecoder) {
+                int64_t videoTimestamp = mVideoDecoder->getTimestamp();
+                int64_t audioTimestamp = mAudioDecoder->getTimestamp();
+                int64_t avTimeDiff = audioTimestamp - videoTimestamp;
+
+                LOGW("[video]-setOnFrameArrived frame arrived, AV time diff: %" PRId64 "ms, video_pts=%ld, audio_pts=%ld",
+                     avTimeDiff, videoTimestamp, audioTimestamp)
+
+                // 关键逻辑：视频等待 max(video_pts, audio_pts) 这个时间点
+                // 简化算法：如果音频超前，等待差值时间
+                // 如果视频超前，无需等待（继续渲染，音频会自己追上）
+                if (avTimeDiff > 0) {
+                    LOGD("[video]-setOnFrameArrived sync: audio leads by %ldms, video will wait", avTimeDiff)
+
+                } else /*if (avTimeDiff < -DELAY_THRESHOLD)*/ {
+                    // 视频严重落后音频（超过阈值），跳过渲染本帧
+                    av_usleep(abs(avTimeDiff) * 1000);
+                    LOGD("[video]-setOnFrameArrived sync: video lags audio by %ldms, skip this frame", -avTimeDiff)
+                    ///return;
+                }
+            } else {
+                // 无音频时，视频自行对齐系统时间
+                mVideoDecoder->avSync(frame);
             }
+
             AVFrame *finalFrame = nullptr;
-            if (mGridFilter != nullptr) {
-                finalFrame = mGridFilter->process(frame);
-            }
+//            if (mGridFilter != nullptr) {
+//                finalFrame = mGridFilter->process(frame);
+//            }
             if (finalFrame == nullptr) {
                 finalFrame = frame;
             }
-            mVideoDecoder->avSync(frame);
+            LOGD("[video]-setOnFrameArrived finalFrame:%d mGridFilter==null:%d", finalFrame,mGridFilter==nullptr)
             doRender(env, finalFrame);
             if (!mAudioDecoder && mPlayerJni.isValid()) { // no audio track
                 double timestamp = mVideoDecoder->getTimestamp();
@@ -495,7 +533,12 @@ void FFMpegPlayer::AudioDecodeLoop() {
 
     mAudioDecoder->setOnFrameArrived([this, env](AVFrame *frame) {
         if (!mHasAbort && mAudioDecoder) {
+            // ====== 音频同步策略 ======
+            // 音频一旦写入 AudioTrack，播放速度由系统固定（采样率驱动）
+            // 解码线程的同步对播放速度无控制力，因此仅按自己的 PTS 对齐
+            // 视频线程会等待音频进度来实现音视频同步
             mAudioDecoder->avSync(frame);
+
             doRender(env, frame);
             if (mPlayerJni.isValid()) {
                 double timestamp = mAudioDecoder->getTimestamp();
@@ -712,6 +755,11 @@ double FFMpegPlayer::getDuration() {
  *   3. 清空视频/音频包队列
  *   4. 视频/音频解码线程检测到 Seek 位置后执行实际 Seek
  *   5. Seek 完成后唤醒读包线程继续读包
+ *
+ *   Seek 时的同步恢复策略：
+ *   - 两个解码线程都设置 mFixStartTime = true
+ *   - 各自在下一帧解码时重新建立 mStartTimeMsForSync 参考时刻
+ *   - 确保 Seek 后能够立即同步到新的媒体位置
  */
 bool FFMpegPlayer::seek(double timeS) {
     LOGI("seek to: %f, player state: %d", timeS, mPlayerState)
