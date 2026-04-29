@@ -13,6 +13,7 @@
 
 #include "FFMpegPlayer.h"
 #include "../vendor/nlohmann/json.hpp"
+#include "header/CommonUtils.h"
 
 FFMpegPlayer::FFMpegPlayer() {
     LOGI("FFMpegPlayer")
@@ -416,7 +417,25 @@ void FFMpegPlayer::VideoDecodeLoop() {
             if (finalFrame == nullptr) {
                 finalFrame = frame;
             }
-            mVideoDecoder->avSync(frame);
+
+            if (mAudioDecoder) {
+                int64_t videoTimestamp = mVideoDecoder->getTimestamp();
+                int64_t audioTimestamp = 0;
+                audioTimestamp = mAudioDecoder->getTimestamp();
+                // ← 关键：比较两者
+                int64_t maxTimestamp = std::max(videoTimestamp, audioTimestamp);
+
+                // 视频应该等到更晚的那一个
+                int64_t targetWaitMs = maxTimestamp - (getCurrentTimeMs() - mVideoDecoder->getStartTimeMsForSync());
+                if (targetWaitMs > 0) {
+                    av_usleep(targetWaitMs * 1000);  // ← 根据两者的 max 等待
+                }
+            } else {
+                // 无音频时，视频自行对齐
+                mVideoDecoder->avSync(frame);
+            }
+
+
             doRender(env, finalFrame);
             if (!mAudioDecoder && mPlayerJni.isValid()) { // no audio track
                 double timestamp = mVideoDecoder->getTimestamp();

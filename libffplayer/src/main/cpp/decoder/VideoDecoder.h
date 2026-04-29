@@ -41,6 +41,8 @@ public:
     virtual int seek(double pos) override;
     virtual void release() override;
 
+
+    int64_t getStartTimeMsForSync() const;    ///< 获取,音视频同步起始时间（ms）
     int64_t getTimestamp() const;             ///< 获取当前帧时间戳（ms）
     int getRotate();                         ///< 获取视频旋转角度
     AVRational getDisplayAspectRatio();      ///< 获取显示宽高比（DAR）

@@ -678,3 +678,7 @@ AVRational VideoDecoder::getDisplayAspectRatio() {
     }
     return dar;
 }
+
+int64_t VideoDecoder::getStartTimeMsForSync() const {
+    return mStartTimeMsForSync;
+}
