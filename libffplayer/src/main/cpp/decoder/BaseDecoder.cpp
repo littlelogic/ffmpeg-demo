@@ -64,7 +64,20 @@ int BaseDecoder::getStreamIndex() const {
     return mStreamIndex;
 }
 
-void BaseDecoder::avSync(AVFrame *frame) {
+bool BaseDecoder::avSync(AVFrame *frame) {
+    return true;
+}
+
+void BaseDecoder::setMediaClock(std::shared_ptr<MediaClock> clock) {
+    mMediaClock = std::move(clock);
+}
+
+void BaseDecoder::setStreamStartPtsMs(int64_t ms) {
+    mStreamStartPtsMs = ms;
+}
+
+int64_t BaseDecoder::getStreamStartPtsMs() const {
+    return mStreamStartPtsMs;
 }
 
 int BaseDecoder::seek(double pos) {

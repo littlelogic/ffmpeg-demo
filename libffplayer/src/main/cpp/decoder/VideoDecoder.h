@@ -37,7 +37,7 @@ public:
     virtual double getDuration() override;
     virtual bool prepare() override;         ///< 准备解码器（含硬件加速配置）
     virtual int decode(AVPacket *packet) override;  ///< 解码视频包
-    virtual void avSync(AVFrame *frame) override;   ///< 音视频同步
+    virtual bool avSync(AVFrame *frame) override;   ///< 音视频同步（返回 false 表示该帧应丢弃）
     virtual int seek(double pos) override;
     virtual void release() override;
 

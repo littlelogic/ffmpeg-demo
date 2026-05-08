@@ -34,7 +34,7 @@ public:
 
     virtual int decode(AVPacket *packet) override;  ///< 解码并重采样
 
-    virtual void avSync(AVFrame *frame) override;   ///< 音视频同步
+    virtual bool avSync(AVFrame *frame) override;   ///< 音视频同步（音频几乎不丢帧，恒返回 true）
 
     virtual int seek(double pos) override;
 

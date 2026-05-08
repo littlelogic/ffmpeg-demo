@@ -17,6 +17,8 @@
 #include <sstream>
 #include <ctime>
 #include <thread>
+#include <mutex>
+#include <atomic>
 #include <memory.h>
 #include "header/Logger.h"
 #include "../utils/MutexObj.h"
@@ -24,6 +26,7 @@
 #include "../decoder/AudioDecoder.h"
 #include "../base/AVPacketQueue.h"
 #include "../filter/FFFilter.h"
+#include "MediaClock.h"
 
 extern "C" {
 #include "../vendor/ffmpeg/libavutil/avutil.h"
@@ -135,6 +138,13 @@ private:
     bool mIsMute = false;                            ///< 是否静音
     bool mIsSeek = false;                            ///< 是否正在 Seek
 
+    // per-stream EOF 标志：用于支持"音轨比视频短"等不对称结束的情况。
+    // 只有当对方流也结束（或对方不存在）时才回调 onPlayCompleted。
+    std::mutex mEofMutex;                            ///< 保护下面三个 EOF 状态的并发访问
+    bool mVideoStreamEnded = false;                  ///< 视频流是否已解码完毕（mEofMutex 守护）
+    bool mAudioStreamEnded = false;                  ///< 音频流是否已解码完毕（mEofMutex 守护）
+    std::atomic<bool> mPlayCompletedNotified{false}; ///< 是否已回调 onPlayCompleted（保证只通知一次）
+
     std::shared_ptr<MutexObj> mMutexObj = nullptr;   ///< 线程同步互斥锁
 
     volatile double mVideoSeekPos = -1;              ///< 视频 Seek 目标位置（-1 表示无 Seek）
@@ -151,6 +161,8 @@ private:
     std::shared_ptr<AudioDecoder> mAudioDecoder = nullptr;      ///< 音频解码器
 
     AVFormatContext *mFtx = nullptr;                 ///< FFmpeg 格式化上下文
+
+    std::shared_ptr<MediaClock> mMediaClock = nullptr; ///< 主时钟（音视频同步参考）
 
     // 网格滤镜，软解有效，硬解用 OpenGL 实现
     bool mEnableGridFilter = false;                  ///< 是否启用网格滤镜
@@ -176,7 +188,14 @@ private:
     void AudioDecodeLoop();     ///< 音频解码线程主循环
 
     void updatePlayerState(PlayerState state);  ///< 更新播放器状态
-    void onPlayCompleted(JNIEnv *env);          ///< 播放完成处理
+    void onPlayCompleted(JNIEnv *env);          ///< 播放完成处理（已带去重）
+
+    /**
+     * @brief 流级别 EOF 处理（线程安全）
+     * @details 标记本流结束；当所有存在的流都结束时，仅触发一次 onPlayCompleted。
+     * @param isVideo 标记视频流（true）还是音频流（false）
+     */
+    void handleStreamEof(bool isVideo, JNIEnv *env);
 };
 
 

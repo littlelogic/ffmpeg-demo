@@ -13,6 +13,7 @@
 #define FFMPEGDEMO_BASEDECODER_H
 
 #include <functional>
+#include <memory>
 #include <string>
 #include "../vendor/nlohmann/json.hpp"
 
@@ -22,7 +23,13 @@ extern "C" {
 #include "../vendor/ffmpeg/libavutil/time.h"
 }
 
-#define DELAY_THRESHOLD 100 ///< 音视频同步最大延迟阈值（100ms）
+class MediaClock;
+
+// 同步控制阈值（毫秒），均为相对 MediaClock 的"媒体时间"差值。
+#define AV_SYNC_FORWARD_NOSLEEP_MS  5    ///< 视频领先 ≤5ms：直接渲染，不 sleep
+#define AV_SYNC_FORWARD_MAX_SLEEP_MS 1000 ///< 单次 sleep 上限，避免异常 PTS 导致死等
+#define AV_SYNC_DROP_MS             100  ///< 视频落后超过该值：丢帧
+#define AV_SYNC_AUDIO_PACE_CAP_MS   500  ///< 音频节拍单次 sleep 兜底上限
 
 class BaseDecoder {
 
@@ -33,7 +40,12 @@ public:
     virtual double getDuration();          ///< 获取时长（秒）
     virtual bool prepare();                ///< 准备解码器
     virtual int decode(AVPacket *packet);  ///< 解码一个包
-    virtual void avSync(AVFrame *frame);   ///< 音视频同步
+    /**
+     * 音视频同步入口。
+     * @return true  -> 调用方应继续渲染该帧
+     *         false -> 调用方应丢弃该帧（视频落后过多时使用）
+     */
+    virtual bool avSync(AVFrame *frame);
     virtual int seek(double pos);          ///< Seek 到指定位置（秒）
     virtual void flush();                  ///< 清空解码缓冲
     virtual void release();                ///< 释放资源
@@ -47,6 +59,13 @@ public:
 
     void setErrorMsgListener(std::function<void(int, std::string &)> listener);  ///< 设置错误回调
     void setOnFrameArrived(std::function<void(AVFrame *)> listener);             ///< 设置帧到达回调
+
+    /// 注入主时钟（FFMpegPlayer 在 prepare 时调用）
+    void setMediaClock(std::shared_ptr<MediaClock> clock);
+
+    /// 设置流的起始 PTS（毫秒），用于把不同流的时间戳统一到"媒体起点为 0"的坐标系。
+    void setStreamStartPtsMs(int64_t ms);
+    int64_t getStreamStartPtsMs() const;
 
 protected:
     AVFormatContext *mFtx = nullptr;       ///< 格式化上下文
@@ -62,6 +81,9 @@ protected:
     int64_t mRetryReceiveCount = 7;        ///< EOF 重试接收计数（RETRY_RECEIVE_COUNT）
     bool mFixStartTime = false;            ///< 是否需要修复同步起始时间（Seek 后）
     nlohmann::json mMediaInfoJson;         ///< 媒体信息 JSON 对象
+
+    std::shared_ptr<MediaClock> mMediaClock = nullptr; ///< 主时钟（由 FFMpegPlayer 注入）
+    int64_t mStreamStartPtsMs = 0;         ///< 当前流的起始 PTS（用于跨流归一化）
 
 private:
     int mStreamIndex = -1;                 ///< 流索引

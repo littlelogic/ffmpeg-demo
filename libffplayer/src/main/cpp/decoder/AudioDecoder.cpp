@@ -11,6 +11,7 @@
 #include "AudioDecoder.h"
 #include "header/Logger.h"
 #include "header/CommonUtils.h"
+#include "../main/MediaClock.h"
 
 AudioDecoder::AudioDecoder(int index, AVFormatContext *ftx): BaseDecoder(index, ftx) {
     LOGI("AudioDecoder")
@@ -185,13 +186,29 @@ void AudioDecoder::updateTimestamp(AVFrame *frame) {
         mStartTimeMsForSync = getCurrentTimeMs();
     }
 
-    // s -> ms
-    mCurTimeStampMs = (int64_t)(frame->pts * av_q2d(mTimeBase) * 1000);
+    // 优先使用 best_effort_timestamp，兼容个别容器没有 frame->pts 的情况
+    int64_t pts = AV_NOPTS_VALUE;
+    if (frame->best_effort_timestamp != AV_NOPTS_VALUE) {
+        pts = frame->best_effort_timestamp;
+    } else if (frame->pts != AV_NOPTS_VALUE) {
+        pts = frame->pts;
+    } else if (frame->pkt_dts != AV_NOPTS_VALUE) {
+        pts = frame->pkt_dts;
+    }
 
+    if (pts != AV_NOPTS_VALUE) {
+        mCurTimeStampMs = (int64_t)(pts * av_q2d(mTimeBase) * 1000);
+    } else if (frame->pkt_duration > 0) {
+        int64_t deltaMs = (int64_t)(frame->pkt_duration * av_q2d(mTimeBase) * 1000);
+        mCurTimeStampMs += deltaMs;
+    }
+
+    // 兜底路径：无 MediaClock 时仍然修复本地系统锚点
     if (mFixStartTime) {
-        mStartTimeMsForSync = getCurrentTimeMs() - mCurTimeStampMs;
+        int64_t normPts = mCurTimeStampMs - mStreamStartPtsMs;
+        mStartTimeMsForSync = getCurrentTimeMs() - normPts;
         mFixStartTime = false;
-        LOGE("fix audio start time")
+        LOGE("fix audio start time (legacy fallback)")
     }
 }
 
@@ -199,16 +216,36 @@ int64_t AudioDecoder::getTimestamp() const {
     return mCurTimeStampMs;
 }
 
-void AudioDecoder::avSync(AVFrame *frame) {
-    int64_t elapsedTimeMs = getCurrentTimeMs() - mStartTimeMsForSync;
-    int64_t diff = mCurTimeStampMs - elapsedTimeMs;
-    diff = FFMIN(diff, DELAY_THRESHOLD);
-    LOGI("[audio] avSync, pts: %" PRId64 "ms, diff: %" PRId64 "ms", mCurTimeStampMs, diff)
-    if (diff > 0) {
-        av_usleep(diff * 1000);
-    } else {
-        LOGE("avSync warning")
+/**
+ * @brief 音频同步
+ *
+ * 设计要点：
+ *   - 音频通常不丢样本（耳朵很敏感），所以这里不会返回 false。
+ *   - 当 SyncType == AUDIO_MASTER 时，把"即将写入 AudioTrack 的这一段 PCM 对应的 PTS"
+ *     上报给 MediaClock，作为视频侧对齐的主时钟。
+ *   - 同时仍保留一段本地系统时间节拍（与历史行为一致），目的是不要让解码侧
+ *     用 NON_BLOCKING write 把 AudioTrack 缓冲冲爆。等后续把 AudioTrack 改成
+ *     BLOCKING 写或独立 PCMQueue + RenderThread 时，可以删除此处的 sleep。
+ */
+bool AudioDecoder::avSync(AVFrame *frame) {
+    int64_t normPts = mCurTimeStampMs - mStreamStartPtsMs;
+
+    if (mMediaClock && mMediaClock->getSyncType() == MediaClock::SyncType::AUDIO_MASTER) {
+        mMediaClock->updateAudioClock(normPts);
+    } else if (mMediaClock) {
+        // 即使不是主时钟，也更新一下"上次更新时间"用于 staleness 检测
+        mMediaClock->updateAudioClock(normPts);
     }
+
+    // 节拍：本地系统时间锚点（节流喂入，避免 AudioTrack 缓冲被瞬间冲爆）
+    int64_t elapsedTimeMs = getCurrentTimeMs() - mStartTimeMsForSync;
+    int64_t diff = normPts - elapsedTimeMs;
+    LOGI("[audio] avSync, pts: %" PRId64 " ms, diff: %" PRId64 " ms", normPts, diff)
+    if (diff > AV_SYNC_FORWARD_NOSLEEP_MS) {
+        int64_t sleepMs = diff > AV_SYNC_AUDIO_PACE_CAP_MS ? AV_SYNC_AUDIO_PACE_CAP_MS : diff;
+        av_usleep(sleepMs * 1000);
+    }
+    return true;
 }
 
 double AudioDecoder::getDuration() {

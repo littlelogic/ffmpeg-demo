@@ -114,6 +114,7 @@ add_library( # Sets the name of the library.
         utils/TraceUtils.cpp
 
         main/FFMpegPlayer.cpp
+        main/MediaClock.cpp
         native-lib.cpp
         )
 

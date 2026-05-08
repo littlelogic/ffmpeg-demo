@@ -17,12 +17,14 @@ MutexObj::~MutexObj() {
 
 void MutexObj::wakeUp() {
     pthread_mutex_lock(&mMutex);
+    //wait 循环检查共享条件 markWaitTodo152
     pthread_cond_signal(&mCond);
     pthread_mutex_unlock(&mMutex);
 }
 
 void MutexObj::wait() {
     pthread_mutex_lock(&mMutex);
+    // 循环检查共享条件 markWaitTodo152
     pthread_cond_wait(&mCond, &mMutex);
     pthread_mutex_unlock(&mMutex);
 }

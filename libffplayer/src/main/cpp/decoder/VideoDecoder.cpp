@@ -14,6 +14,7 @@
 #include "header/Logger.h"
 #include "header/CommonUtils.h"
 #include "../reader/FFVideoReader.h"
+#include "../main/MediaClock.h"
 
 // 全局变量：保存硬件解码器支持的像素格式
 static enum AVPixelFormat hw_pix_fmt = AV_PIX_FMT_NONE;
@@ -450,46 +451,42 @@ int64_t VideoDecoder::getTimestamp() const {
  * @param frame 解码后的视频帧
  */
 void VideoDecoder::updateTimestamp(AVFrame *frame) {
-    // ====== 第一步：初始化同步起始时间 ======
+    // 兼容兜底：在没有 MediaClock 注入时，使用本地系统时间锚点
     if (mStartTimeMsForSync < 0) {
-        LOGE("update video start time")
         mStartTimeMsForSync = getCurrentTimeMs();
     }
 
-    // ====== 第二步：从帧中提取 PTS（Presentation Time Stamp） ======
-    /*int64_t pts = 0;
-    // 优先使用 DTS（Decoding Time Stamp），如果不可用则使用 PTS
-    if (frame->pkt_dts != AV_NOPTS_VALUE) {
-        pts = frame->pkt_dts;
+    // 优先使用 best_effort_timestamp（FFmpeg 综合 pts/dts/解码顺序给出的最优 PTS）；
+    // 这样既能正确处理 B 帧/PTS 缺失，也能避免使用已 deprecated 的 coded_picture_number。
+    int64_t pts = AV_NOPTS_VALUE;
+    if (frame->best_effort_timestamp != AV_NOPTS_VALUE) {
+        pts = frame->best_effort_timestamp;
     } else if (frame->pts != AV_NOPTS_VALUE) {
         pts = frame->pts;
-    }*/
-    int64_t pts = 0;
-    if (frame->pts != AV_NOPTS_VALUE) {
-        pts = frame->pts;  // 优先用显示时间戳（正确的音视频同步）
     } else if (frame->pkt_dts != AV_NOPTS_VALUE) {
-        pts = frame->pkt_dts;  // 降级方案（某些格式没有 PTS）
-    } else {
-        // 如果都没有，使用帧号估算（最后的保险）
-        pts = frame->coded_picture_number;
+        pts = frame->pkt_dts;
     }
-    LOGD("[video] updateTimestamp: pts=%ld, dts=%ld",
+
+    if (pts != AV_NOPTS_VALUE) {
+        mCurTimeStampMs = (int64_t)(pts * av_q2d(mTimeBase) * 1000);
+    } else if (frame->pkt_duration > 0) {
+        // VFR / 容器异常时，按 packet 持续时间累加。
+        int64_t deltaMs = (int64_t)(frame->pkt_duration * av_q2d(mTimeBase) * 1000);
+        mCurTimeStampMs += deltaMs;
+    }
+
+    LOGD("[video] updateTimestamp: pts=%ld, dts=%ld, best=%ld -> %" PRId64 " ms",
          (frame->pts != AV_NOPTS_VALUE ? frame->pts : -1),
-         (frame->pkt_dts != AV_NOPTS_VALUE ? frame->pkt_dts : -1));
+         (frame->pkt_dts != AV_NOPTS_VALUE ? frame->pkt_dts : -1),
+         (long)(frame->best_effort_timestamp != AV_NOPTS_VALUE ? frame->best_effort_timestamp : -1),
+         mCurTimeStampMs);
 
-
-
-    // ====== 第三步：时间戳转换（秒 -> 毫秒） ======
-    // av_q2d() 函数将有理数转为浮点数
-    // mTimeBase 是时间基数（如 1/25 表示 25fps）
-    mCurTimeStampMs = (int64_t)(pts * av_q2d(mTimeBase) * 1000);
-
-    // ====== 第四步：处理 Seek 后的时间戳修复 ======
+    // 兼容兜底路径：无 MediaClock 时，本地系统锚点的 fix-start-time 仍生效（Seek 后用）。
     if (mFixStartTime) {
-        // 重新计算同步起始时间，以适应 Seek 后的新位置
-        mStartTimeMsForSync = getCurrentTimeMs() - mCurTimeStampMs;
+        int64_t normPts = mCurTimeStampMs - mStreamStartPtsMs;
+        mStartTimeMsForSync = getCurrentTimeMs() - normPts;
         mFixStartTime = false;
-        LOGE("fix video start time")
+        LOGE("fix video start time (legacy fallback)")
     }
 }
 
@@ -518,33 +515,60 @@ double VideoDecoder::getDuration() {
 }
 
 /**
- * @brief 音视频同步函数
- * @details 根据当前帧的时间戳和播放器实际运行时间，进行同步控制
+ * @brief 视频音视频同步函数
+ * @details 优先使用注入的 MediaClock 作为参考；无 MediaClock 时回退到本地系统时间锚点。
  *
- * 流程说明：
- * 1. 计算播放器从开始运行到现在的实际耗时
- * 2. 计算当前帧应该播放的时间与实际时间的差值
- * 3. 如果帧超前，则睡眠以等待（同步）
- * 4. 如果帧滞后，则继续播放下一帧（丢帧）
+ * 同步策略：
+ *   diff = videoPts(已归一化为媒体时间) - clock.nowMs()
+ *   - diff < -AV_SYNC_DROP_MS  → 落后过多，丢帧（不渲染）
+ *   - diff >  AV_SYNC_FORWARD_NOSLEEP_MS → 提前到达，sleep min(diff, MAX_SLEEP)
+ *   - 其他 → 立即渲染
+ *
+ *   若 SyncType == VIDEO_MASTER（无音轨/音轨失败），则把当前 PTS 推送给 MediaClock 作为时钟。
  *
  * @param frame 当前视频帧（用于上下文信息）
+ * @return true 调用方应渲染该帧；false 应丢弃该帧。
  */
-void VideoDecoder::avSync(AVFrame *frame) {
-    // 计算播放器从开始到现在的实际经过时间
-    int64_t elapsedTimeMs = getCurrentTimeMs() - mStartTimeMsForSync;
+bool VideoDecoder::avSync(AVFrame *frame) {
+    int64_t normPts = mCurTimeStampMs - mStreamStartPtsMs;
 
-    // 计算当前帧时间与播放器实际时间的差值
-    int64_t diff = mCurTimeStampMs - elapsedTimeMs;
+    if (mMediaClock) {
+        int64_t now = mMediaClock->nowMs();
+        int64_t diff = normPts - now;
 
-    // 限制最大延迟（防止同步延迟过长）
-    diff = FFMIN(diff, DELAY_THRESHOLD);
+        // 视频严重落后 → 丢帧，避免越拖越远
+        if (diff < -AV_SYNC_DROP_MS) {
+            LOGW("[video] drop late frame, pts=%" PRId64 " ms, clock=%" PRId64 " ms, diff=%" PRId64 " ms",
+                 normPts, now, diff)
+            return false;
+        }
 
-    LOGI("[video] avSync, pts: %" PRId64 "ms, diff: %" PRId64 "ms", mCurTimeStampMs, diff)
+        // 视频领先 → 等待
+        if (diff > AV_SYNC_FORWARD_NOSLEEP_MS) {
+            int64_t sleepMs = diff > AV_SYNC_FORWARD_MAX_SLEEP_MS ? AV_SYNC_FORWARD_MAX_SLEEP_MS : diff;
+            LOGI("[video] sync wait, pts=%" PRId64 " ms, diff=%" PRId64 " ms, sleep=%" PRId64 " ms",
+                 normPts, diff, sleepMs)
+            av_usleep(sleepMs * 1000);
+        } else {
+            LOGI("[video] sync ok, pts=%" PRId64 " ms, diff=%" PRId64 " ms", normPts, diff)
+        }
 
-    // 如果帧超前，则睡眠等待（微秒级）
-    if (diff > 0) {
-        av_usleep(diff * 1000);
+        // 视频主时钟模式：由视频帧驱动 MediaClock
+        if (mMediaClock->getSyncType() == MediaClock::SyncType::VIDEO_MASTER) {
+            mMediaClock->updateVideoClock(normPts);
+        }
+        return true;
     }
+
+    // ===== 兜底（未注入 MediaClock）：使用本地系统时间锚点 =====
+    int64_t elapsedTimeMs = getCurrentTimeMs() - mStartTimeMsForSync;
+    int64_t diff = normPts - elapsedTimeMs;
+    LOGI("[video] avSync (legacy), pts: %" PRId64 " ms, diff: %" PRId64 " ms", normPts, diff)
+    if (diff > AV_SYNC_FORWARD_NOSLEEP_MS) {
+        int64_t sleepMs = diff > AV_SYNC_FORWARD_MAX_SLEEP_MS ? AV_SYNC_FORWARD_MAX_SLEEP_MS : diff;
+        av_usleep(sleepMs * 1000);
+    }
+    return diff >= -AV_SYNC_DROP_MS;
 }
 
 /**

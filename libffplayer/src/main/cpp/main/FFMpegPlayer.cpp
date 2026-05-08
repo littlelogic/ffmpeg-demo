@@ -18,6 +18,7 @@
 FFMpegPlayer::FFMpegPlayer() {
     LOGI("FFMpegPlayer")
     mMutexObj = std::make_shared<MutexObj>();
+    mMediaClock = std::make_shared<MediaClock>();
 }
 
 FFMpegPlayer::~FFMpegPlayer() {
@@ -90,6 +91,13 @@ bool FFMpegPlayer::prepare(JNIEnv *env, std::string &path, jobject surface) {
     }
 
     mHasAbort = false;
+    {
+        std::lock_guard<std::mutex> lk(mEofMutex);
+        mVideoStreamEnded = false;
+        mAudioStreamEnded = false;
+    }
+
+    mPlayCompletedNotified.store(false);
     bool videoPrepared = false;
     // step4: prepare video decoder
     if (videoIndex >= 0) {
@@ -153,7 +161,48 @@ bool FFMpegPlayer::prepare(JNIEnv *env, std::string &path, jobject surface) {
     }
     bool prepared = videoPrepared || audioPrePared;
     LOGI("videoPrepared: %d, audioPrePared: %d, path: %s", videoPrepared, audioPrePared, path.c_str())
+
     if (prepared) {
+        // ====== 配置 MediaClock：归一化 stream start_time、确定 SyncType、注入解码器 ======
+        mMediaClock->reset();
+
+        // [&] 是Lambda表达式的捕获子句，表示以引用捕获
+        auto streamStartMs = [&](int idx) -> int64_t {
+            if (idx < 0 || idx >= (int) mFtx->nb_streams) return 0;
+            AVStream *st = mFtx->streams[idx];
+            if (st->start_time == AV_NOPTS_VALUE) return 0;
+            return (int64_t)(st->start_time * av_q2d(st->time_base) * 1000);
+        };
+
+        int64_t videoStartMs = videoPrepared ? streamStartMs(videoIndex) : INT64_MAX;
+        int64_t audioStartMs = audioPrePared ? streamStartMs(audioIndex) : INT64_MAX;
+        int64_t mediaStartMs = std::min(videoStartMs, audioStartMs);
+        if (mediaStartMs == INT64_MAX) mediaStartMs = 0;
+
+        if (videoPrepared && mVideoDecoder) {
+            mVideoDecoder->setStreamStartPtsMs(mediaStartMs);
+            mVideoDecoder->setMediaClock(mMediaClock);
+        }
+        if (audioPrePared && mAudioDecoder) {
+            mAudioDecoder->setStreamStartPtsMs(mediaStartMs);
+            mAudioDecoder->setMediaClock(mMediaClock);
+        }
+
+        // 选择主时钟类型：有可用音轨则 AUDIO_MASTER；否则 VIDEO_MASTER；都没有则 EXTERNAL。
+        if (audioPrePared) {
+            mMediaClock->setSyncType(MediaClock::SyncType::AUDIO_MASTER);
+        } else if (videoPrepared) {
+            mMediaClock->setSyncType(MediaClock::SyncType::VIDEO_MASTER);
+        } else {
+            // 理论上不会到这里：外层 if (prepared) 保证至少一路就绪。
+            // 留作防御：万一以后控制流被改动，至少能日志告警而不是 nowMs 一直返回 0。
+            mMediaClock->setSyncType(MediaClock::SyncType::EXTERNAL);
+        }
+        mMediaClock->setStartPtsMs(mediaStartMs);
+        // 不在此处启动主时钟：reset 后 mAnchorSysMs<0，nowMs 恒为 0，
+        // 真正"起跑"在 start() 中调用 seekTo(0) 完成，避免 prepare→start 之间空跑造成首帧丢帧。
+        LOGI("MediaClock configured: syncType=%d, mediaStartMs=%" PRId64, (int) mMediaClock->getSyncType(), mediaStartMs)
+
         updatePlayerState(PlayerState::PREPARE);
     }
 
@@ -169,6 +218,10 @@ void FFMpegPlayer::start() {
     if (mPlayerState != PlayerState::PREPARE) {  // prepared failed
         return;
     }
+    // 这里才真正"起跑"主时钟：把锚点设到 (mediaTime=0, sys=now)，nowMs 开始随系统时间外推。
+    if (mMediaClock) {
+        mMediaClock->seekTo(0);
+    }
     updatePlayerState(PlayerState::START);
     if (mReadPacketThread == nullptr) {
         mReadPacketThread = new std::thread(&FFMpegPlayer::ReadPacketLoop, this);
@@ -177,11 +230,15 @@ void FFMpegPlayer::start() {
 
 /**
  * @brief 恢复播放
- * @details 恢复状态为 PLAYING，修复时间戳并唤醒等待的线程
+ * @details 恢复主时钟（把锚点平移到 now，保证 nowMs 连续），状态置为 PLAYING，唤醒等待线程。
  */
 void FFMpegPlayer::resume() {
+    if (mMediaClock) {
+        mMediaClock->resume();
+    }
     updatePlayerState(PlayerState::PLAYING);
-    if(mVideoDecoder) {
+    // 兼容兜底：万一某个解码器仍走 legacy 路径，让它修复一次本地锚点
+    if (mVideoDecoder) {
         mVideoDecoder->needFixStartTime();
     }
     if (mAudioDecoder) {
@@ -192,8 +249,13 @@ void FFMpegPlayer::resume() {
 
 /**
  * @brief 暂停播放
+ * @details 冻结主时钟，状态置为 PAUSE。冻结期间 MediaClock::nowMs() 保持不变，
+ *          因此暂停时长不会被计入"经过时间"，恢复后画面/声音不会跳一段。
  */
 void FFMpegPlayer::pause() {
+    if (mMediaClock) {
+        mMediaClock->pause();
+    }
     updatePlayerState(PlayerState::PAUSE);
 }
 
@@ -224,6 +286,12 @@ void FFMpegPlayer::stop() {
     mIsSeek = false;
     mVideoSeekPos = -1;
     mAudioSeekPos = -1;
+    {
+        std::lock_guard<std::mutex> lk(mEofMutex);
+        mVideoStreamEnded = false;
+        mAudioStreamEnded = false;
+    }
+    mPlayCompletedNotified.store(false);
     mPath = "";
 
     // release video res
@@ -257,6 +325,10 @@ void FFMpegPlayer::stop() {
         avformat_free_context(mFtx);
         mFtx = nullptr;
         LOGI("format context...release")
+    }
+
+    if (mMediaClock) {
+        mMediaClock->reset();
     }
 }
 
@@ -405,44 +477,37 @@ void FFMpegPlayer::VideoDecodeLoop() {
     }
 
     mVideoDecoder->setOnFrameArrived([this, env](AVFrame *frame) {
-        if (!mHasAbort && mVideoDecoder) {
-            if (mAudioDecoder) {
-                auto diff = mAudioDecoder->getTimestamp() - mVideoDecoder->getTimestamp();
-                LOGW("[video] frame arrived, AV time diff: %" PRId64, diff)
-            }
-            AVFrame *finalFrame = nullptr;
-            if (mGridFilter != nullptr) {
-                finalFrame = mGridFilter->process(frame);
-            }
-            if (finalFrame == nullptr) {
-                finalFrame = frame;
-            }
-
-            if (mAudioDecoder) {
-                int64_t videoTimestamp = mVideoDecoder->getTimestamp();
-                int64_t audioTimestamp = 0;
-                audioTimestamp = mAudioDecoder->getTimestamp();
-                // ← 关键：比较两者
-                int64_t maxTimestamp = std::max(videoTimestamp, audioTimestamp);
-
-                // 视频应该等到更晚的那一个
-                int64_t targetWaitMs = maxTimestamp - (getCurrentTimeMs() - mVideoDecoder->getStartTimeMsForSync());
-                if (targetWaitMs > 0) {
-                    av_usleep(targetWaitMs * 1000);  // ← 根据两者的 max 等待
-                }
-            } else {
-                // 无音频时，视频自行对齐
-                mVideoDecoder->avSync(frame);
-            }
-
-
-            doRender(env, finalFrame);
-            if (!mAudioDecoder && mPlayerJni.isValid()) { // no audio track
-                double timestamp = mVideoDecoder->getTimestamp();
-                env->CallVoidMethod(mPlayerJni.instance, mPlayerJni.onPlayProgress, timestamp);
-            }
-        } else {
+        if (mHasAbort || !mVideoDecoder) {
             LOGE("[video] setOnFrameArrived, has abort")
+            return;
+        }
+
+        // ====== 同步：统一交给 VideoDecoder::avSync(基于 MediaClock) ======
+        bool shouldRender = mVideoDecoder->avSync(frame);
+
+        if (!shouldRender) {
+            // 落后过多 → 丢帧。MediaCodec 路径必须显式归还输出 buffer，否则会耗尽。
+            if (frame->format == AV_PIX_FMT_MEDIACODEC) {
+                av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
+            }
+            return;
+        }
+
+        // ====== 滤镜处理 ======
+        AVFrame *finalFrame = nullptr;
+        if (mGridFilter != nullptr) {
+            finalFrame = mGridFilter->process(frame);
+        }
+        if (finalFrame == nullptr) {
+            finalFrame = frame;
+        }
+
+        doRender(env, finalFrame);
+
+        // 无音轨时，进度由视频驱动回调
+        if (!mAudioDecoder && mPlayerJni.isValid()) {
+            double timestamp = mVideoDecoder->getTimestamp();
+            env->CallVoidMethod(mPlayerJni.instance, mPlayerJni.onPlayProgress, timestamp);
         }
     });
 
@@ -477,9 +542,7 @@ void FFMpegPlayer::VideoDecodeLoop() {
                 av_packet_free(&packet);
                 if (ret == AVERROR_EOF) {
                     LOGE("VideoDecodeLoop AVERROR_EOF")
-                    if (!mAudioDecoder) { // 存在音轨以音频播放结束为准
-                        onPlayCompleted(env);
-                    }
+                    handleStreamEof(/*isVideo=*/true, env);
                 }
             } else {
                 LOGE("VideoDecodeLoop pop packet failed...")
@@ -556,7 +619,7 @@ void FFMpegPlayer::AudioDecodeLoop() {
                 av_packet_free(&packet);
                 if (ret == AVERROR_EOF) {
                     LOGE("AudioDecodeLoop AVERROR_EOF")
-                    onPlayCompleted(env);
+                    handleStreamEof(/*isVideo=*/false, env);
                 }
             } else {
                 LOGE("AudioDecodeLoop pop packet failed...")
@@ -735,6 +798,14 @@ double FFMpegPlayer::getDuration() {
 bool FFMpegPlayer::seek(double timeS) {
     LOGI("seek to: %f, player state: %d", timeS, mPlayerState)
     mIsSeek = true;
+    // seek 之后两条流都重新开始消费 packet，先把 EOF 标志清掉，
+    // 避免 "complete -> seek -> 再次播放到同一端点" 时误判为已结束。
+    {
+        std::lock_guard<std::mutex> lk(mEofMutex);
+        mVideoStreamEnded = false;
+        mAudioStreamEnded = false;
+    }
+    mPlayCompletedNotified.store(false);
     if (mVideoPacketQueue != nullptr) {
         mVideoSeekPos = timeS;
         mVideoPacketQueue->clear();
@@ -742,6 +813,17 @@ bool FFMpegPlayer::seek(double timeS) {
     if (mAudioPacketQueue != nullptr) {
         mAudioSeekPos = timeS;
         mAudioPacketQueue->clear();
+    }
+    // 统一拨动主时钟到目标位置；这样音/视频解码线程不再各自修复锚点，
+    // 避免短时间内两条时间轴不一致的失同步窗口。
+    if (mMediaClock) {
+        // seek 完成后通常会重新进入 AUDIO_MASTER（如果有音轨），先把 SyncType 恢复
+        if (mAudioDecoder) {
+            mMediaClock->setSyncType(MediaClock::SyncType::AUDIO_MASTER);
+        } else if (mVideoDecoder) {
+            mMediaClock->setSyncType(MediaClock::SyncType::VIDEO_MASTER);
+        }
+        mMediaClock->seekTo((int64_t)(timeS * 1000));
     }
     return true;
 }
@@ -765,8 +847,48 @@ int FFMpegPlayer::getRotate() {
 }
 
 void FFMpegPlayer::onPlayCompleted(JNIEnv *env) {
+    // 用 atomic compare-exchange 保证只回调一次。
+    bool expected = false;
+    /*
+        原子地比较 mPlayCompletedNotified 的当前值与 expected 是否相等：
+        如果相等：将 mPlayCompletedNotified 设置为 true，并返回 true。
+        如果不相等：将 expected 更新为 mPlayCompletedNotified 的当前值，并返回 false
+     */
+    if (!mPlayCompletedNotified.compare_exchange_strong(expected, true)) {
+        return;
+    }
     if (mPlayerJni.isValid()) {
         env->CallVoidMethod(mPlayerJni.instance, mPlayerJni.onPlayCompleted);
+    }
+}
+
+/**
+ * @brief 流级别 EOF 处理
+ * @details 在 mEofMutex 保护下设置自身 EOF 标志，并在两路（或仅有的那路）都结束时
+ *          调用 onPlayCompleted。
+ *          - 解决了"两条 decode 线程几乎同时 EOF"在 SMP 上的写写/读读乱序导致的双方都漏发或重复发问题。
+ *          - 对于音频流结束，额外触发 MediaClock::onAudioEnded() 把主时钟降级到 EXTERNAL，
+ *            让视频继续按系统时钟外推播完队列里剩余的帧。
+ */
+void FFMpegPlayer::handleStreamEof(bool isVideo, JNIEnv *env) {
+    bool shouldComplete = false;
+    {
+        std::lock_guard<std::mutex> lk(mEofMutex);
+        if (isVideo) {
+            mVideoStreamEnded = true;
+        } else {
+            mAudioStreamEnded = true;
+            // 音频结束：把主时钟降级，避免视频侧依赖音频推动 clock。
+            if (mMediaClock) {
+                mMediaClock->onAudioEnded();
+            }
+        }
+        bool videoDone = (!mVideoDecoder) || mVideoStreamEnded;
+        bool audioDone = (!mAudioDecoder) || mAudioStreamEnded;
+        shouldComplete = videoDone && audioDone;
+    }
+    if (shouldComplete) {
+        onPlayCompleted(env); // 内部会用 atomic 去重
     }
 }
 
