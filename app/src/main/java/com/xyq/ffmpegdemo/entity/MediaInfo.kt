@@ -16,6 +16,9 @@ class MediaInfo(json: String?) {
     var height = 0
     var duration = 0.0
     var rotate = 0
+    var fps = 0
+    var frameRate = ""
+
 
 
     // audio
@@ -42,6 +45,8 @@ class MediaInfo(json: String?) {
                     height = video.getInt("height")
                     duration = video.getDouble("duration")
                     rotate = video.getInt("rotate")
+                    fps = video.getInt("fps")
+                    frameRate = video.getString("frame_rate")
                 }
 
                 hasAudio = obj.has("audio")
@@ -60,6 +65,14 @@ class MediaInfo(json: String?) {
     }
 
     override fun toString(): String {
-        return "MediaInfo(path='$path', hasVideo=$hasVideo, useHw=$useHw, videoCodecName='$videoCodecName', dar='$dar', width=$width, height=$height, duration=$duration, rotate=$rotate, hasAudio=$hasAudio, audioCodecName='$audioCodecName', channel=$channel, sampleFmt='$sampleFmt', sampleRate=$sampleRate)"
+        return "MediaInfo(path='$path', hasVideo=$hasVideo, useHw=$useHw, videoCodecName='$videoCodecName'" +
+                ", dar='$dar', " +
+                "width=$width, " +
+                "height=$height, " +
+                "duration=$duration,秒 " +
+                "rotate=$rotate, " +
+                "fps=$fps, " +
+                "frameRate=$frameRate, " +
+                "hasAudio=$hasAudio, audioCodecName='$audioCodecName', channel=$channel, sampleFmt='$sampleFmt', sampleRate=$sampleRate)"
     }
 }

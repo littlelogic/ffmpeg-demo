@@ -244,7 +244,9 @@ bool VideoDecoder::prepare() {
     auto ratio = getDisplayAspectRatio();
     mMediaInfoJson["dar"] = std::to_string(ratio.num) + ":" + std::to_string(ratio.den);
     mMediaInfoJson["rotate"] = getRotate();
-
+    mMediaInfoJson["fps"] = getFps();
+    auto frameRate = getFrameRate();
+    mMediaInfoJson["frame_rate"] = std::to_string(frameRate.num) + ":" + std::to_string(frameRate.den);
     return true;
 }
 
@@ -706,3 +708,16 @@ AVRational VideoDecoder::getDisplayAspectRatio() {
 int64_t VideoDecoder::getStartTimeMsForSync() const {
     return mStartTimeMsForSync;
 }
+
+double VideoDecoder::getFps() {
+    AVStream *stream = mFtx->streams[getStreamIndex()];
+    AVRational fr = av_guess_frame_rate(mFtx, stream, nullptr);
+    if (fr.den == 0) return 0.0;
+    return av_q2d(fr);   // 例如 30000/1001 → 29.97
+}
+
+AVRational VideoDecoder::getFrameRate() {
+    AVStream *stream = mFtx->streams[getStreamIndex()];
+    return av_guess_frame_rate(mFtx, stream, nullptr);
+}
+

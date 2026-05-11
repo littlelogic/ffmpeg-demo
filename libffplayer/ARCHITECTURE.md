@@ -620,3 +620,19 @@ avSync 通过 now - mStartTimeMsForSync 推导"应播放进度"，与帧 PTS 比
 现已被 MediaClock 取代为主路径，只在未注入 MediaClock 时作为兜底使用。
 ```
 
+```
+2. 关键帧表（"每个 I 帧的时间戳"）
+FFmpeg 内部有一个 AVStream::index_entries，对绝大多数容器来说关键帧已经索引化了：
+
+AVStream *st = mFtx->streams[videoIndex];
+int n = avformat_index_get_entries_count(st);   // FFmpeg ≥ 4.4
+for (int i = 0; i < n; ++i) {
+    const AVIndexEntry *e = avformat_index_get_entry(st, i);
+    int64_t ptsMs = (int64_t)(e->timestamp * av_q2d(st->time_base) * 1000);
+    bool isKey = e->flags & AVINDEX_KEYFRAME;   // mp4/mkv 通常只索引关键帧
+    int64_t bytePos = e->pos;
+}
+代价：O(K)（K 是关键帧数），不需要解码、不需要扫流。这是实现"关键帧缩略图列表"或"快速跳到关键帧"的标准做法，几乎所有视频编辑/播放器都是这么做的。
+
+注意：旧版 FFmpeg 直接访问 st->internal->index_entries，6.x 之后建议用 avformat_index_get_entry() 这套 API。
+```

@@ -69,6 +69,9 @@ private:
 
     void updateTimestamp(AVFrame *frame);     ///< 更新帧时间戳
     int swsScale(AVFrame *srcFrame, AVFrame *swFrame); ///< 像素格式转换
+
+    double getFps();
+    AVRational getFrameRate();
 };
 
 
