@@ -4,6 +4,7 @@
  *
  * 功能说明：
  * - getVideoFramesCore: 批量抽帧（精准/快速模式），支持缩放和旋转
+ * - nativeProbeMediaInfo: 仅根据路径探测媒体信息（无需 Surface）
  * - nativeExportGif: 将视频导出为 GIF 动画
  *
  * 对应 Java 类: com.xyq.libffplayer.utils.FFMpegUtils
@@ -11,7 +12,9 @@
 
 #include <jni.h>
 #include <memory.h>
+#include <string>
 #include "../reader/FFVideoReader.h"
+#include "../reader/FFMediaProbe.h"
 #include "../writer/FFVideoWriter.h"
 #include "header/Logger.h"
 #include "ScopedUtfChars.h"
@@ -107,6 +110,18 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_getVideoFramesCore(JNIEnv *env, jobje
     delete reader;
 
     env->CallVoidMethod(cb, onFetchEnd);
+}
+
+/**
+ * @brief 探测媒体信息 JSON（与 FFPlayer.getMediaInfo 外层结构一致，无需创建播放器）
+ */
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeProbeMediaInfo(JNIEnv *env, jobject thiz, jstring path) {
+    ScopedUtfChars scopedPath(env, path);
+    std::string s_path = scopedPath.c_str();
+    std::string info = ff_probe_media_info(s_path);
+    return env->NewStringUTF(info.c_str());
 }
 
 /**

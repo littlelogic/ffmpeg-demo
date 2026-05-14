@@ -100,6 +100,7 @@ add_library( # Sets the name of the library.
 
         ./reader/FFReader.cpp
         ./reader/FFVideoReader.cpp
+        ./reader/FFMediaProbe.cpp
 
         ./writer/FFVideoWriter.cpp
 

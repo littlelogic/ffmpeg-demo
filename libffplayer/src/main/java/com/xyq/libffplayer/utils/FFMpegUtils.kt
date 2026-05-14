@@ -38,10 +38,15 @@ object FFMpegUtils {
     }
 
     /**
-     * 将输入视频的关键帧导出为gif
+     * 仅根据本地文件路径探测媒体信息，无需 Surface / 无需创建 [com.xyq.libffplayer.FFPlayer]。
+     *
+     * 返回 JSON 字符串，结构与 [com.xyq.libffplayer.FFPlayer.getMediaInfo] 一致：
+     * `path`、`video` / `audio` 为嵌套的 JSON 字符串字段（与现有解析逻辑兼容）。
+     * 探测阶段 `use_hw` 固定为 false；`codec_name` 为 `avcodec_find_decoder` 对应的解码器名（通常为软解名）。
      */
-    fun exportGif(videoPath: String, output: String): Boolean {
-        return nativeExportGif(videoPath, output)
+    fun probeMediaInfo(path: String): String? {
+        if (path.isEmpty()) return null
+        return nativeProbeMediaInfo(path)
     }
 
     private external fun getVideoFramesCore(path: String,
@@ -50,6 +55,15 @@ object FFMpegUtils {
                                             precise: Boolean,
                                             cb: VideoFrameArrivedInterface
     )
+
+    private external fun nativeProbeMediaInfo(path: String): String
+
+    /**
+     * 将输入视频的关键帧导出为gif
+     */
+    fun exportGif(videoPath: String, output: String): Boolean {
+        return nativeExportGif(videoPath, output)
+    }
 
     private fun allocateFrame(width: Int, height: Int): ByteBuffer {
         return ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.LITTLE_ENDIAN)

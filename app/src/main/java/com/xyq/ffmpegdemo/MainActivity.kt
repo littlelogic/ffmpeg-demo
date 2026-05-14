@@ -26,6 +26,7 @@ import com.donkingliang.imageselector2.model.ImageModel
 import com.donkingliang.imageselector2.utils.ImageSelector
 import com.xyq.ffmpegdemo.adapter.ThumbnailAdapter
 import com.xyq.ffmpegdemo.databinding.ActivityMainBinding
+import com.xyq.ffmpegdemo.entity.MediaInfo
 import com.xyq.ffmpegdemo.entity.Thumbnail
 import com.xyq.ffmpegdemo.player.IMediaPlayer
 import com.xyq.ffmpegdemo.player.IMediaPlayerStatusListener
@@ -353,7 +354,10 @@ class MainActivity : AppCompatActivity() {
         mBinding.seekBar.visibility = visible
     }
 
+    var playPath = ""
+
     private fun startPlay(path: String, isVideo: Boolean) {
+        playPath = path
         showOrHideVideoModeView(isVideo)
         if (isVideo) {
             fetchVideoThumbnail(path)
@@ -493,7 +497,12 @@ class MainActivity : AppCompatActivity() {
      * 显示媒体信息对话框
      */
     private fun showMediaInfoDialog() {
-        val mediaInfo = (mPlayer as MyPlayer).getMediaInfo()
+
+        val json = FFMpegUtils.probeMediaInfo(playPath) ?: return
+        val mediaInfo = MediaInfo(json)
+
+
+//        val mediaInfo = (mPlayer as MyPlayer).getMediaInfo()
         if (mediaInfo == null) {
             Toast.makeText(this, "媒体信息未加载", Toast.LENGTH_SHORT).show()
             return
