@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Super Downloader</string>
+    <string name="recaptcha_cookies_key" translatable="false">recaptcha_cookies_key</string>
+</resources>

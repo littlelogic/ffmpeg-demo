@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="CircleImageView">
+        <attr name="circle_image_view_type" format="string"/>
+        <attr name="circle_image_view_radius" format="dimension"/>
+        <attr name="circle_image_view_radius_LT" format="dimension"/>
+        <attr name="circle_image_view_radius_LB" format="dimension"/>
+        <attr name="circle_image_view_radius_RT" format="dimension"/>
+        <attr name="circle_image_view_radius_RB" format="dimension"/>
+    </declare-styleable>
+
+    <declare-styleable name="stl_SmartTabLayout">
+        <attr name="stl_indicatorAlwaysInCenter" format="boolean"/>
+        <attr name="stl_indicatorWithoutPadding" format="boolean"/>
+        <attr name="stl_indicatorInFront" format="boolean"/>
+        <attr name="stl_indicatorInterpolation" format="enum">
+            <enum name="smart" value="0"/>
+            <enum name="linear" value="1"/>
+        </attr>
+        <attr name="stl_indicatorGravity" format="enum">
+            <enum name="bottom" value="0"/>
+            <enum name="top" value="1"/>
+            <enum name="center" value="2"/>
+        </attr>
+        <attr name="stl_indicatorColor" format="color"/>
+        <attr name="stl_indicatorColors" format="reference"/>
+        <attr name="stl_indicatorThickness" format="dimension"/>
+        <attr name="stl_indicatorWidth" format="dimension">
+            <enum name="auto" value="-1"/>
+        </attr>
+        <attr name="stl_indicatorCornerRadius" format="dimension"/>
+        <attr name="stl_overlineColor" format="color"/>
+        <attr name="stl_overlineThickness" format="dimension"/>
+        <attr name="stl_underlineColor" format="color"/>
+        <attr name="stl_underlineThickness" format="dimension"/>
+        <attr name="stl_dividerColor" format="color"/>
+        <attr name="stl_dividerColors" format="reference"/>
+        <attr name="stl_dividerThickness" format="dimension"/>
+        <attr name="stl_defaultTabBackground" format="reference"/>
+        <attr name="stl_defaultTabTextAllCaps" format="boolean"/>
+        <attr name="stl_defaultTabTextColor" format="color|reference"/>
+        <attr name="stl_defaultTabTextSize" format="dimension"/>
+        <attr name="stl_defaultTabTextHorizontalPadding" format="dimension"/>
+        <attr name="stl_defaultTabTextMinWidth" format="dimension"/>
+        <attr name="stl_customTabTextLayoutId" format="reference"/>
+        <attr name="stl_customTabTextViewId" format="reference"/>
+        <attr name="stl_distributeEvenly" format="boolean"/>
+        <attr name="stl_clickable" format="boolean"/>
+        <attr name="stl_titleOffset" format="dimension">
+            <enum name="auto_center" value="-1"/>
+        </attr>
+        <attr name="stl_selectTabBackground" format="reference"/>
+        <attr name="stl_drawDecorationAfterTab" format="boolean"/>
+        <attr name="stl_tabmarginright" format="dimension"/>
+    </declare-styleable>
+
+    <declare-styleable name="DonutProgressView">
+        <attr name="donut_progress" format="integer"/>
+        <attr name="donut_max" format="integer"/>
+
+        <attr name="donut_unfinished_color" format="color"/>
+        <attr name="donut_finished_color" format="color"/>
+
+        <attr name="donut_finished_stroke_width" format="dimension"/>
+        <attr name="donut_unfinished_stroke_width" format="dimension"/>
+
+        <attr name="donut_text_size" format="dimension"/>
+        <attr name="donut_text_color" format="color"/>
+
+        <attr name="donut_prefix_text" format="string"/>
+        <attr name="donut_suffix_text" format="string"/>
+        <attr name="donut_text" format="string"/>
+
+        <attr name="donut_background_color" format="color"/>
+
+        <attr name="donut_inner_bottom_text" format="string"/>
+        <attr name="donut_inner_bottom_text_size" format="dimension"/>
+        <attr name="donut_inner_bottom_text_color" format="color"/>
+
+        <attr name="donut_circle_starting_degree" format="integer" />
+        <attr name="donut_show_text" format="boolean"/>
+        <attr name="donut_inner_drawable" format="reference"/>
+    </declare-styleable>
+
+    <declare-styleable name="PageStateLayout">
+        <attr name="emptyId" format="reference" />
+        <attr name="errorNetId" format="reference" />
+        <attr name="errorServerId" format="reference" />
+        <attr name="loadingId" format="reference" />
+        <attr name="loginId" format="reference" />
+        <attr name="loadingType">
+            <enum name="nobg" value="1" />
+            <enum name="hasbg" value="2" />
+            <enum name="hasbgNoText" value="3" />
+            <enum name="progress" value="4" />
+        </attr>
+        <attr name="loadingHint" format="string" />
+        <attr name="skinMode" >
+            <enum name="black" value="1" />
+            <enum name="white" value="2" />
+        </attr>
+        <attr name="loginHint" format="string" />
+        <attr name="childViewPaddingBottom" format="dimension"/>
+        <attr name="childViewPaddingTop" format="dimension"/>
+        <attr name="isChildClickable" format="boolean"/>
+    </declare-styleable>
+
+    <declare-styleable name="SwipeBackLayout">
+        <attr name="edge_size" format="dimension"/>
+        <attr name="edge_flag">
+            <enum name="left" value="0" />
+            <enum name="right" value="1" />
+            <enum name="bottom" value="2" />
+            <enum name="all" value="3" />
+        </attr>
+        <attr name="shadow_left" format="reference"/>
+        <attr name="shadow_right" format="reference"/>
+        <attr name="shadow_bottom" format="reference"/>
+    </declare-styleable>
+
+    <attr name="SwipeBackLayoutStyle" format="reference"/>
+
+    <declare-styleable name="SearchLayout">
+        <attr name="Sear_textSize" format="dimension"/>
+        <attr name="Sear_textColor" format="string"/>
+        <attr name="Sear_background" format="string"/>
+    </declare-styleable>
+
+    <attr format="color" name="dotsColor"/>
+    <attr format="color" name="selectedDotColor"/>
+    <attr format="color" name="dotsStrokeColor"/>
+    <attr format="dimension" name="dotsSize"/>
+    <attr format="float" name="dotsWidthFactor"/>
+    <attr format="dimension" name="dotsSpacing"/>
+    <attr format="dimension" name="dotsCornerRadius"/>
+    <attr format="dimension" name="dotsStrokeWidth"/>
+    <attr format="float" name="stiffness"/>
+    <attr format="float" name="dampingRatio"/>
+    <attr format="boolean" name="progressMode"/>
+
+    <declare-styleable name="DotsIndicator">
+        <attr name="dotsColor"/>
+        <attr name="selectedDotColor"/>
+        <attr name="dotsSize"/>
+        <attr name="dotsWidthFactor"/>
+        <attr name="dotsSpacing"/>
+        <attr name="dotsCornerRadius"/>
+        <attr name="progressMode"/>
+    </declare-styleable>
+
+    <declare-styleable name="AspectRatioImageView">
+        <attr format="float" name="ari_ratio"/>
+    </declare-styleable>
+
+    <declare-styleable name="BannerTextView">
+        <attr name="duration" format="integer" />
+        <attr name="delayTime" format="integer" />
+        <attr name="animIn" format="reference" />
+        <attr name="animOut" format="reference" />
+    </declare-styleable>
+
+    <declare-styleable name="TagsLayout">
+        <attr name="tagVerticalSpace" format="dimension" />
+        <attr name="tagHorizontalSpace" format="dimension" />
+    </declare-styleable>
+
+    <declare-styleable name="BubbleTextView">
+        <attr name="bubbleColor" format="reference|color" />
+        <attr name="bubbleStrokeColor" format="reference|color" />
+        <attr name="bubbleStrokeWidth" format="dimension" />
+        <attr name="bubbleRadius" format="dimension" />
+        <attr name="triangleHeight" format="dimension" />
+        <attr name="triangleDirection">
+            <flag name="top" value="1" />
+            <flag name="bottom" value="2" />
+        </attr>
+        <attr name="trianglePosition" format="integer" />
+    </declare-styleable>
+</resources>

@@ -39,6 +39,11 @@ android {
 }
 
 dependencies {
+
+    implementation project(':imageselector')
+
+
+
     implementation project(path: ':libbase')
     implementation project(path: ':libutils')
     implementation project(path: ':libmediapicker')

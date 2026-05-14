@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="96dp">
+
+
+    <!--
+     <com.donkingliang.imageselector2.view.RoundImageView
+    -->
+    <com.donkingliang.imageselector2.view.RoundImageView
+        android:id="@+id/iv_image"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:layout_centerVertical="true"
+        android:layout_marginLeft="16dp"
+        android:layout_marginRight="12dp"
+        android:scaleType="centerCrop"
+        app:radius="4dp" />
+
+    <ImageView
+        android:id="@+id/iv_select"
+        android:layout_width="15dp"
+        android:layout_height="15dp"
+        android:layout_alignParentRight="true"
+        android:layout_centerVertical="true"
+        android:layout_marginRight="18dp"
+        android:src="@drawable/icon_image_select" />
+
+    <RelativeLayout
+        android:id="@+id/textContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_centerVertical="true"
+        android:layout_marginRight="16dp"
+        android:layout_toRightOf="@+id/iv_image">
+
+        <TextView
+            android:id="@+id/tv_folder_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" "
+            android:textColor="#CCFFFFFF"
+            android:textSize="15dp" />
+
+        <TextView
+            android:id="@+id/tv_folder_size"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_below="@+id/tv_folder_name"
+            android:layout_marginTop="5dp"
+            android:text=" "
+            android:textColor="#66FFFFFF"
+            android:textSize="15dp" />
+
+    </RelativeLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0.5dp"
+        android:layout_alignLeft="@+id/textContainer"
+        android:layout_alignParentBottom="true"
+        android:background="#1AFFFFFF" />
+
+</RelativeLayout>

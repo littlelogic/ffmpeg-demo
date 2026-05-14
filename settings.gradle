@@ -30,6 +30,18 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "FFMpegDplayer"
+
+if (true) {
+
+    include ':SmartTabLayout'
+    project(':SmartTabLayout').projectDir = new File('libraries/SmartTabLayout')
+
+    include ':imageselector'
+    project(':imageselector').projectDir = new File('libraries/imageselector')
+
+}
+
+
 include ':libutils'
 include ':libbase'
 include ':libpng'
@@ -42,4 +54,9 @@ include ':app'
 include ':libjpeg'
 
 include ':PermissionX'
+
+
+
+
+
 

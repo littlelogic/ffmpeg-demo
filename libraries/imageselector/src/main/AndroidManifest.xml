@@ -1,0 +1,30 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.donkingliang.imageselector">
+
+    <application>
+        <provider
+            android:name="com.donkingliang.imageselector2.provider.ImageSelectorProvider"
+            android:authorities="${applicationId}.imageSelectorProvider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/image_selector_file_paths" />
+        </provider>
+
+       <activity
+            android:name="com.donkingliang.imageselector2.ImageSelectorActivity"
+            android:configChanges="orientation|keyboardHidden|screenSize"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+        <activity
+            android:name="com.donkingliang.imageselector2.PreviewActivity"
+            android:configChanges="orientation|keyboardHidden|screenSize"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+        <activity
+            android:name="com.donkingliang.imageselector2.ClipImageActivity"
+            android:configChanges="orientation|keyboardHidden|screenSize"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
+    </application>
+
+</manifest>

@@ -19,6 +19,10 @@ import androidx.core.content.PermissionChecker
 import androidx.core.content.res.ResourcesCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.donkingliang.imageselector2.ImageSelectorActivity
+import com.donkingliang.imageselector2.entry.RequestConfig
+import com.donkingliang.imageselector2.model.ImageModel
+import com.donkingliang.imageselector2.utils.ImageSelector
 import com.xyq.ffmpegdemo.adapter.ThumbnailAdapter
 import com.xyq.ffmpegdemo.databinding.ActivityMainBinding
 import com.xyq.ffmpegdemo.entity.Thumbnail
@@ -104,6 +108,39 @@ class MainActivity : AppCompatActivity() {
         val text = CommonUtils.generateTextBitmap("雪月清的随笔", 16f, applicationContext)
         mBinding.ivWatermark.setImageBitmap(text)
 
+    }
+
+
+    fun loadVideo(){
+
+        if (false) {
+            val intent = Intent(this, MediaPickerActivity::class.java)
+            intent.putExtra(PickerConfig.SELECT_MODE, PickerConfig.PICKER_IMAGE_VIDEO)
+            intent.putExtra(PickerConfig.MAX_SELECT_COUNT, 1)
+            mLauncher.launch(intent)
+        }
+
+
+
+        val config = RequestConfig()
+        config.type = ImageModel.Type.Video
+        config.maxSelectCount = 1
+        config.minSelectCount = 1
+        val intent = Intent(this@MainActivity, ImageSelectorActivity::class.java)
+        intent.putExtra(ImageSelector.KEY_CONFIG, config)
+        mLauncher.launch(intent)
+
+
+        /*this@MainActivity.startActivityForResult(intent, requestCode)
+        ImageSelectorActivity
+            .openActivity(this@MainActivity, RequestCodeCode_GifActivity, config)
+
+        this@MainActivity.startActivity(
+            Intent(
+                this@MainActivity,
+                ImageSelectorActivity::class.java
+            )
+        )*/
     }
 
     private fun checkPermissionAndRunNext(run: Runnable?) {
@@ -259,10 +296,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         mBinding.btnImport.setOnClickListener {
-            val intent = Intent(this, MediaPickerActivity::class.java)
-            intent.putExtra(PickerConfig.SELECT_MODE, PickerConfig.PICKER_IMAGE_VIDEO)
-            intent.putExtra(PickerConfig.MAX_SELECT_COUNT, 1)
-            mLauncher.launch(intent)
+            loadVideo()
         }
 
         mBinding.btnExport.setOnClickListener {
