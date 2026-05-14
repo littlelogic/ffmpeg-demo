@@ -66,4 +66,19 @@
         android:textSize="40dp"
         android:visibility="gone" />
 
+    <ImageView
+        android:id="@+id/btn_media_info"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:layout_gravity="left|top"
+        android:layout_marginLeft="4dp"
+        android:layout_marginTop="4dp"
+        android:padding="3dp"
+        android:background="#66000000"
+        android:src="@android:drawable/ic_dialog_info"
+        android:contentDescription="媒体信息"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true" />
+
 </FrameLayout>

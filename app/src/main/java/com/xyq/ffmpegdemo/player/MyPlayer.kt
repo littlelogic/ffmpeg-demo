@@ -9,7 +9,7 @@ import android.media.audiofx.Visualizer
 import android.opengl.GLSurfaceView
 import android.util.Log
 import android.view.Surface
-import com.xyq.ffmpegdemo.entity.MediaInfo
+import com.xyq.libffplayer.entity.MediaInfo
 import com.xyq.libbase.player.IPlayer
 import com.xyq.libbase.player.IPlayerListener
 import com.xyq.libffplayer.FFPlayer

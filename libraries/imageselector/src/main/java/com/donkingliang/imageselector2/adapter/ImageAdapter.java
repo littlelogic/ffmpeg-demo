@@ -10,6 +10,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.load.engine.DiskCacheStrategy;
@@ -19,6 +20,8 @@ import com.donkingliang.imageselector.R;
 import com.donkingliang.imageselector2.ImageSelectorActivity;
 import com.donkingliang.imageselector2.entry.Media;
 import com.donkingliang.imageselector2.utils.VersionUtils;
+
+import com.xyq.libffplayer.ui.MediaInfoDialogHelper;
 
 import java.util.ArrayList;
 
@@ -115,6 +118,26 @@ public class ImageAdapter extends RecyclerView.Adapter<ImageAdapter.ViewHolder> 
                 }
             } else {
                  holder.video_during.setVisibility(View.GONE);
+            }
+
+            if (holder.btnMediaInfo != null) {
+                if (image.isVideo()) {
+                    holder.btnMediaInfo.setVisibility(View.VISIBLE);
+                    holder.btnMediaInfo.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            String path = image.getPath();
+                            if (path != null && !path.isEmpty()) {
+                                MediaInfoDialogHelper.show(imageSelectorActivity, path);
+                            } else {
+                                Toast.makeText(mContext, "无法读取视频路径", Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    });
+                } else {
+                    holder.btnMediaInfo.setVisibility(View.GONE);
+                    holder.btnMediaInfo.setOnClickListener(null);
+                }
             }
 
             //点击选中/取消选中图片
@@ -332,6 +355,7 @@ public class ImageAdapter extends RecyclerView.Adapter<ImageAdapter.ViewHolder> 
         ImageView ivMasking;
         ImageView ivGif;
         ImageView ivCamera;
+        ImageView btnMediaInfo;
         TextView video_during;
         TextView maskTextView;
         public ViewHolder(View itemView) {
@@ -342,6 +366,7 @@ public class ImageAdapter extends RecyclerView.Adapter<ImageAdapter.ViewHolder> 
             ivGif = itemView.findViewById(R.id.iv_gif);
 
             ivCamera = itemView.findViewById(R.id.iv_camera);
+            btnMediaInfo = itemView.findViewById(R.id.btn_media_info);
             video_during = itemView.findViewById(R.id.video_during);
             maskTextView = itemView.findViewById(R.id.maskTextView);
         }

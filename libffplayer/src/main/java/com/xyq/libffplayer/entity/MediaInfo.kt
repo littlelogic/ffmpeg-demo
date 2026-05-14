@@ -1,13 +1,15 @@
-package com.xyq.ffmpegdemo.entity
+package com.xyq.libffplayer.entity
 
 import org.json.JSONObject
-import java.lang.Exception
+import kotlin.math.roundToInt
 
+/**
+ * 解析 [com.xyq.libffplayer.FFPlayer.getMediaInfo] / [com.xyq.libffplayer.utils.FFMpegUtils.probeMediaInfo] 返回的 JSON。
+ */
 class MediaInfo(json: String?) {
 
     var path = ""
 
-    // video
     var hasVideo = false
     var useHw = false
     var videoCodecName = ""
@@ -19,15 +21,11 @@ class MediaInfo(json: String?) {
     var fps = 0
     var frameRate = ""
 
-
-
-    // audio
     var hasAudio = false
     var audioCodecName = ""
     var channel = 0
     var sampleFmt = ""
     var sampleRate = 0
-
 
     init {
         json?.let {
@@ -45,7 +43,7 @@ class MediaInfo(json: String?) {
                     height = video.getInt("height")
                     duration = video.getDouble("duration")
                     rotate = video.getInt("rotate")
-                    fps = video.getInt("fps")
+                    fps = video.optDouble("fps", 0.0).roundToInt()
                     frameRate = video.getString("frame_rate")
                 }
 
@@ -57,9 +55,7 @@ class MediaInfo(json: String?) {
                     sampleFmt = audio.getString("sample_fmt")
                     sampleRate = audio.getInt("sample_rate")
                 }
-
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
             }
         }
     }

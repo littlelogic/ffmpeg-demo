@@ -14,7 +14,6 @@ import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
 import androidx.core.content.res.ResourcesCompat
@@ -26,7 +25,8 @@ import com.donkingliang.imageselector2.model.ImageModel
 import com.donkingliang.imageselector2.utils.ImageSelector
 import com.xyq.ffmpegdemo.adapter.ThumbnailAdapter
 import com.xyq.ffmpegdemo.databinding.ActivityMainBinding
-import com.xyq.ffmpegdemo.entity.MediaInfo
+import com.xyq.libffplayer.ui.MediaInfoDialogHelper
+import com.xyq.libffplayer.utils.FFMpegUtils
 import com.xyq.ffmpegdemo.entity.Thumbnail
 import com.xyq.ffmpegdemo.player.IMediaPlayer
 import com.xyq.ffmpegdemo.player.IMediaPlayerStatusListener
@@ -34,7 +34,6 @@ import com.xyq.ffmpegdemo.player.MyPlayer
 import com.xyq.ffmpegdemo.player.PlayerConfig
 import com.xyq.ffmpegdemo.viewmodel.PlayViewModel
 import com.xyq.ffmpegdemo.viewmodel.VideoThumbnailViewModel
-import com.xyq.libffplayer.utils.FFMpegUtils
 import com.xyq.libmediapicker.MediaPickerActivity
 import com.xyq.libmediapicker.PickerConfig
 import com.xyq.libmediapicker.entity.Media
@@ -497,48 +496,6 @@ class MainActivity : AppCompatActivity() {
      * 显示媒体信息对话框
      */
     private fun showMediaInfoDialog() {
-
-        val json = FFMpegUtils.probeMediaInfo(playPath) ?: return
-        val mediaInfo = MediaInfo(json)
-
-
-//        val mediaInfo = (mPlayer as MyPlayer).getMediaInfo()
-        if (mediaInfo == null) {
-            Toast.makeText(this, "媒体信息未加载", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val message = StringBuilder().apply {
-            appendLine("=== 媒体信息 ===")
-            appendLine()
-            appendLine("文件路径: ${mediaInfo.path}")
-            appendLine()
-
-            if (mediaInfo.hasVideo) {
-                appendLine("--- 视频信息 ---")
-                appendLine("编码格式: ${mediaInfo.videoCodecName}")
-                appendLine("分辨率: ${mediaInfo.width} x ${mediaInfo.height}")
-                appendLine("帧率: ${mediaInfo.fps} fps")
-                appendLine("宽高比: ${mediaInfo.dar}")
-                appendLine("时长: ${String.format("%.2f", mediaInfo.duration)} 秒")
-                appendLine("旋转角度: ${mediaInfo.rotate}°")
-                appendLine("硬件加速: ${if (mediaInfo.useHw) "是" else "否"}")
-                appendLine()
-            }
-
-            if (mediaInfo.hasAudio) {
-                appendLine("--- 音频信息 ---")
-                appendLine("编码格式: ${mediaInfo.audioCodecName}")
-                appendLine("采样率: ${mediaInfo.sampleRate} Hz")
-                appendLine("声道数: ${mediaInfo.channel}")
-                appendLine("样本格式: ${mediaInfo.sampleFmt}")
-            }
-        }.toString()
-
-        AlertDialog.Builder(this)
-            .setTitle("媒体信息")
-            .setMessage(message)
-            .setPositiveButton("确定") { dialog, _ -> dialog.dismiss() }
-            .show()
+        MediaInfoDialogHelper.show(this, playPath)
     }
 }
