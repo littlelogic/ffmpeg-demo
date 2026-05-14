@@ -496,6 +496,12 @@ class MainActivity : AppCompatActivity() {
      * 显示媒体信息对话框
      */
     private fun showMediaInfoDialog() {
-        MediaInfoDialogHelper.show(this, playPath)
+        if (false) {
+            (mPlayer as MyPlayer).getMediaInfo()?.let {
+                MediaInfoDialogHelper.syncShow(this, it)
+            }
+        } else {
+            MediaInfoDialogHelper.asyncShow(this, playPath)
+        }
     }
 }

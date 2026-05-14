@@ -17,7 +17,7 @@ object MediaInfoDialogHelper {
     }
 
     @JvmStatic
-    fun show(activity: Activity, mediaPath: String) {
+    fun asyncShow(activity: Activity, mediaPath: String) {
         if (mediaPath.isBlank()) {
             Toast.makeText(activity.applicationContext, "无效路径", Toast.LENGTH_SHORT).show()
             return
@@ -36,6 +36,34 @@ object MediaInfoDialogHelper {
                 showDialogInternal(activity, mediaInfo)
             }
         }
+    }
+
+    @JvmStatic
+    fun syncShow(activity: Activity, mediaInfo : MediaInfo) {
+        if (mediaInfo == null) {
+            Toast.makeText(activity.applicationContext, "无效数据", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (activity.isFinishing) return
+
+        showDialogInternal(activity, mediaInfo)
+    }
+
+    @JvmStatic
+    fun syncShow(activity: Activity, mediaPath: String) {
+        if (mediaPath.isBlank()) {
+            Toast.makeText(activity.applicationContext, "无效路径", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (activity.isFinishing) return
+
+        val json = FFMpegUtils.probeMediaInfo(mediaPath)
+        if (json == null) {
+            Toast.makeText(activity, "媒体信息未加载", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val mediaInfo = MediaInfo(json)
+        showDialogInternal(activity, mediaInfo)
     }
 
     fun formatMessage(mediaInfo: MediaInfo): String {

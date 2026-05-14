@@ -128,7 +128,7 @@ public class ImageAdapter extends RecyclerView.Adapter<ImageAdapter.ViewHolder> 
                         public void onClick(View v) {
                             String path = image.getPath();
                             if (path != null && !path.isEmpty()) {
-                                MediaInfoDialogHelper.show(imageSelectorActivity, path);
+                                MediaInfoDialogHelper.asyncShow(imageSelectorActivity, path);
                             } else {
                                 Toast.makeText(mContext, "无法读取视频路径", Toast.LENGTH_SHORT).show();
                             }
