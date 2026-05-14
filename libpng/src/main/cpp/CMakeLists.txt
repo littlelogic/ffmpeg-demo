@@ -11,8 +11,9 @@ project("png_helper")
 message("build png shared library")
 message("CMAKE_ANDROID_ARCH_ABI: ${CMAKE_ANDROID_ARCH_ABI}")
 
-add_library(cpufeatures STATIC
-        ${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c)
+# Note: We don't create cpufeatures as a separate static library
+# to avoid macOS NDK compatibility issues. Instead, we compile
+# cpu-features.c directly into png_helper library.
 
 set(PNGLIB_MAJOR 1)
 set(PNGLIB_MINOR 6)
@@ -42,6 +43,13 @@ if (PNG_HARDWARE_OPTIMIZATIONS)
 
         add_definitions(-DPNG_ARM_NEON_OPT=2)
 
+        # -mfpu=neon only applies to 32-bit ARM (armv7-a), not arm64-v8a (aarch64)
+        # arm64-v8a natively supports NEON, so we don't need this flag
+        if (CMAKE_SYSTEM_PROCESSOR MATCHES "^arm" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^aarch64")
+            set_property(SOURCE ${libpng_arm_sources}
+                    APPEND_STRING PROPERTY COMPILE_FLAGS " -mfpu=neon")
+        endif ()
+
     endif ()
 else (PNG_HARDWARE_OPTIMIZATIONS)
 
@@ -52,8 +60,6 @@ else (PNG_HARDWARE_OPTIMIZATIONS)
 
 endif (PNG_HARDWARE_OPTIMIZATIONS)
 
-set_property(SOURCE ${libpng_arm_sources}
-        APPEND_STRING PROPERTY COMPILE_FLAGS " -mfpu=neon")
 
 if (NOT AWK OR ANDROID)
     # No awk available to generate sources; use pre-built pnglibconf.h
@@ -99,10 +105,16 @@ set(libpng_sources
         ${libpng_source_dir}/pngwtran.c
         ${libpng_source_dir}/pngwutil.c
 
-        ${libpng_arm_sources}
-
-        ./native-lib.cpp
+        # Add CPU features directly to avoid separate library creation issues
+        ${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c
         )
+
+# Only add ARM sources if hardware optimization is enabled
+if (PNG_HARDWARE_OPTIMIZATIONS)
+    list(APPEND libpng_sources ${libpng_arm_sources})
+endif ()
+
+list(APPEND libpng_sources ./native-lib.cpp)
 
 find_library( # Sets the name of the path variable.
         log-lib
@@ -138,5 +150,4 @@ target_link_libraries(
 
         # system
         z
-        ${log-lib}
-        cpufeatures)
+        ${log-lib})

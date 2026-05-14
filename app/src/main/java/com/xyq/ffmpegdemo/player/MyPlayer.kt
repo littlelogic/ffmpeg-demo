@@ -75,6 +75,8 @@ class MyPlayer(private val mContext: Context,
 
     private var mGetImageCallback:((FrameBuffer?) -> Unit)? = null
 
+    private var mMediaInfo: MediaInfo? = null
+
     init {
         mGlSurfaceView.setEGLContextClientVersion(3)
         mGlSurfaceView.setRenderer(this)
@@ -152,8 +154,8 @@ class MyPlayer(private val mContext: Context,
         mVideoRotate = mProxy!!.getRotate()
         mRenderManager.setVideoRotate(mVideoRotate)
         Log.i(TAG, "prepare: done, duration: $mDuration, rotate: $mVideoRotate, consume: ${System.currentTimeMillis() - start}")
-        val mediaInfo = MediaInfo(mProxy!!.getMediaInfo())
-        Log.i(TAG, "prepare done, media info: $mediaInfo")
+        mMediaInfo = MediaInfo(mProxy!!.getMediaInfo())
+        Log.i(TAG, "prepare done, media info: $mMediaInfo")
     }
 
     private fun initProxy(config: PlayerConfig, isVideo: Boolean) {
@@ -427,6 +429,13 @@ class MyPlayer(private val mContext: Context,
         mIsPlayComplete = true
         enableAudioVisualizer(false)
         mMediaPlayerStatusListener?.onComplete()
+    }
+
+    /**
+     * 获取媒体信息
+     */
+    fun getMediaInfo(): MediaInfo? {
+        return mMediaInfo
     }
 
 

@@ -16,6 +16,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags ''
+                // Disable hardware optimization to avoid macOS NDK toolchain issues
+                arguments '-DPNG_HARDWARE_OPTIMIZATIONS=OFF'
             }
         }
         ndk {
