@@ -40,6 +40,7 @@ android {
 
 dependencies {
 
+    implementation('com.github.littlelogic:commonunit:v1.6')
     implementation project(':imageselector')
 
 

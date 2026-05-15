@@ -1,6 +1,7 @@
 package com.xyq.ffmpegdemo
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -25,8 +26,6 @@ import com.donkingliang.imageselector2.model.ImageModel
 import com.donkingliang.imageselector2.utils.ImageSelector
 import com.xyq.ffmpegdemo.adapter.ThumbnailAdapter
 import com.xyq.ffmpegdemo.databinding.ActivityMainBinding
-import com.xyq.libffplayer.ui.MediaInfoDialogHelper
-import com.xyq.libffplayer.utils.FFMpegUtils
 import com.xyq.ffmpegdemo.entity.Thumbnail
 import com.xyq.ffmpegdemo.player.IMediaPlayer
 import com.xyq.ffmpegdemo.player.IMediaPlayerStatusListener
@@ -34,6 +33,8 @@ import com.xyq.ffmpegdemo.player.MyPlayer
 import com.xyq.ffmpegdemo.player.PlayerConfig
 import com.xyq.ffmpegdemo.viewmodel.PlayViewModel
 import com.xyq.ffmpegdemo.viewmodel.VideoThumbnailViewModel
+import com.xyq.libffplayer.ui.MediaInfoDialogHelper
+import com.xyq.libffplayer.utils.FFMpegUtils
 import com.xyq.libmediapicker.MediaPickerActivity
 import com.xyq.libmediapicker.PickerConfig
 import com.xyq.libmediapicker.entity.Media
@@ -204,6 +205,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    var onResume_play_mark = false
+
     override fun onResume() {
         Log.i(TAG, "onResume: filepath: $mMediaFilePath, isVideo: $mIsVideo")
         super.onResume()
@@ -211,11 +214,16 @@ class MainActivity : AppCompatActivity() {
             checkMediaFileValid(mMediaFilePath, mIsVideo)
             startPlay(mMediaFilePath, mIsVideo)
         }*/
-        ///读取缩略图触发的问题
-        checkPermissionAndRunNext(kotlinx.coroutines.Runnable {
-            checkMediaFileValid(mMediaFilePath, mIsVideo)
-            startPlay(mMediaFilePath, mIsVideo)
-        })
+
+        if (!onResume_play_mark) {
+//            onResume_play_mark = true
+            ///读取缩略图触发的问题
+            checkPermissionAndRunNext(kotlinx.coroutines.Runnable {
+                checkMediaFileValid(mMediaFilePath, mIsVideo)
+                startPlay(mMediaFilePath, mIsVideo)
+            })
+        }
+
     }
 
     override fun onPause() {
@@ -254,8 +262,25 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    fun getScreenSize(context: Context): IntArray {
+        val resources = context.getResources()
+        val dm = resources.getDisplayMetrics()
+        val density1 = dm.density
+        val width = dm.widthPixels
+        val height = dm.heightPixels
+        return intArrayOf(width, height)
+    }
+
     private fun initViews() {
         Log.i(TAG, "initViews: ")
+
+        val resources = this.getResources()
+        val dm = resources.getDisplayMetrics()
+        val width = dm.widthPixels
+        val height = dm.heightPixels
+        mBinding.trackHeader.layoutParams.width = width/2
+        mBinding.trackTailer.layoutParams.width = width/2
+        mBinding.trackContent.layoutParams.width = width * 3
 
         val layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         mBinding.videoThumbnails.layoutManager = layoutManager
