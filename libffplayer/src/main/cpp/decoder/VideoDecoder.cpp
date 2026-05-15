@@ -14,6 +14,7 @@
 #include "header/Logger.h"
 #include "header/CommonUtils.h"
 #include "../reader/FFVideoReader.h"
+#include "../reader/FFMediaProbe.h"
 #include "../main/MediaClock.h"
 
 // 全局变量：保存硬件解码器支持的像素格式
@@ -234,19 +235,22 @@ bool VideoDecoder::prepare() {
     mRetryReceiveCount = RETRY_RECEIVE_COUNT;  // 初始化重试计数
     LOGI("codec name: %s, format: %s", mVideoCodec->name, av_get_pix_fmt_name(AVPixelFormat(params->format)))
 
-    // ====== 第九步：收集媒体信息元数据 ======
+    // ====== 第九步：收集媒体信息元数据（统一走 FFMediaProbe）======
     mMediaInfoJson.clear();
-    mMediaInfoJson["width"] = mWidth;
-    mMediaInfoJson["height"] = mHeight;
-    mMediaInfoJson["use_hw"] = useHwDecoder;
-    mMediaInfoJson["codec_name"] = mVideoCodec->name;
-    mMediaInfoJson["duration"] = getDuration();
-    auto ratio = getDisplayAspectRatio();
-    mMediaInfoJson["dar"] = std::to_string(ratio.num) + ":" + std::to_string(ratio.den);
-    mMediaInfoJson["rotate"] = getRotate();
-    mMediaInfoJson["fps"] = getFps();
-    auto frameRate = getFrameRate();
-    mMediaInfoJson["frame_rate"] = std::to_string(frameRate.num) + ":" + std::to_string(frameRate.den);
+    if (false) {
+        mMediaInfoJson["width"] = mWidth;
+        mMediaInfoJson["height"] = mHeight;
+        mMediaInfoJson["use_hw"] = useHwDecoder;
+        mMediaInfoJson["codec_name"] = mVideoCodec->name;
+        mMediaInfoJson["duration"] = getDuration();
+        auto ratio = getDisplayAspectRatio();
+        mMediaInfoJson["dar"] = std::to_string(ratio.num) + ":" + std::to_string(ratio.den);
+        mMediaInfoJson["rotate"] = getRotate();
+        mMediaInfoJson["fps"] = getFps();
+        auto frameRate = getFrameRate();
+        mMediaInfoJson["frame_rate"] = std::to_string(frameRate.num) + ":" + std::to_string(frameRate.den);
+    }
+    ff_fill_video_media_info_json(mMediaInfoJson, mFtx, getStreamIndex(), useHwDecoder, mVideoCodec->name);
     return true;
 }
 
