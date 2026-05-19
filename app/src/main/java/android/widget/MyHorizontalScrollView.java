@@ -38,6 +38,7 @@ import android.view.ViewDebug;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.animation.AnimationUtils;
+import android.view.animation.DecelerateInterpolator;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.VisibleForTesting;
@@ -76,8 +77,6 @@ public class MyHorizontalScrollView extends FrameLayout {
     /** ★ fling 跳变排查开关。排查完成后改为 false。所有日志统一前缀 "[FLING-DBG]"。 */
     private static final boolean DEBUG_FLING = true;
 
-    /** 仅在 DEBUG_FLING 期间使用：记录上一次 computeScroll 的实际时间戳，用于检测主线程"丢帧" */
-    private long mDbgLastComputeScrollTs = 0L;
     /** 仅在 DEBUG_FLING 期间使用：记录最近一次 fling 启动时的初速度（绝对值） */
     private int mDbgFlingStartVel = 0;
 
@@ -91,6 +90,14 @@ public class MyHorizontalScrollView extends FrameLayout {
      *   边界转折帧若有历史 delta，第一步先按它推进一小步，再交给 startScroll，平滑度更好。
      */
     private int mLastFlingDelta = 0;
+    /**
+     * ★ 最近一次 computeScroll 调用的时间戳；用于得到"上一帧间隔"，
+     *   把 mLastFlingDelta 反推成 px/s 速度，然后给 startScroll 的接管动画算出
+     *   "无缝衔接 fling 末速"的合理时长 T = 2*D/v。
+     */
+    private long mLastComputeScrollTs = 0L;
+    /** ★ 最近一次正常 fling 帧的实际帧间隔（ms），与 mLastFlingDelta 配对使用。 */
+    private long mLastFlingFrameGapMs = 0L;
 
     private long mLastScroll;
 
@@ -324,7 +331,12 @@ public class MyHorizontalScrollView extends FrameLayout {
 
 
     private void initScrollView() {
-        mScroller = new OverScroller(getContext());
+        // ★ 用 DecelerateInterpolator(1.0) 取代 OverScroller 默认的 viscousFluid（"慢-快-慢" S 形）。
+        // 仅影响 SCROLL_MODE（startScroll / smoothScrollBy）；FLING_MODE 用内部 spline 曲线，不受影响。
+        // factor=1.0 时初始"速度系数" = 2.0 (= 2*factor)，与边界接管处 startScroll(D, T) 配合得到
+        // 初始速度 = 2*D/T。当 D=170, T=300ms 时初始速度 ≈ 1133 px/s，
+        // 正好对得上 fling 末段一帧 ~9px/8ms 的 ~1125 px/s——无缝衔接，glide 单调减速到 0。
+        mScroller = new OverScroller(getContext(), new DecelerateInterpolator(1.0f));
         setFocusable(true);
         setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
         setWillNotDraw(false);
@@ -1396,12 +1408,14 @@ public class MyHorizontalScrollView extends FrameLayout {
                 final boolean canOverscroll = overscrollMode == OVER_SCROLL_ALWAYS ||
                         (overscrollMode == OVER_SCROLL_IF_CONTENT_SCROLLS && range > 0);
 
+                // 计算上一帧到这一帧的实际间隔（生产追踪，用于 glide 时长无缝衔接）
+                final long nowTs = AnimationUtils.currentAnimationTimeMillis();
+                final long frameGapMs = (mLastComputeScrollTs == 0L)
+                        ? 0L : (nowTs - mLastComputeScrollTs);
+                mLastComputeScrollTs = nowTs;
+
                 if (DEBUG_FLING) {
                     final int delta = x - oldX;
-                    final long nowTs = AnimationUtils.currentAnimationTimeMillis();
-                    final long frameGapMs = (mDbgLastComputeScrollTs == 0L)
-                            ? 0L : (nowTs - mDbgLastComputeScrollTs);
-                    mDbgLastComputeScrollTs = nowTs;
                     final boolean suspiciousJump = Math.abs(delta) > 200; // 单帧位移过大
                     final boolean jankFrame = frameGapMs > 33L;           // > 2 个 16.7ms 帧
                     Log.d(TAG, "[FLING-DBG][computeScroll]"
@@ -1472,9 +1486,24 @@ public class MyHorizontalScrollView extends FrameLayout {
                         int remaining = edgeTarget - firstStepX;
                         mScroller.abortAnimation();
                         if (remaining != 0) {
-                            // 时长根据剩余距离选 150~300ms，距离越大时长越长（避免短距离也滑很久）
-                            int duration = Math.max(150,
-                                    Math.min(300, Math.abs(remaining) * 2 + 80));
+                            // ★ 关键：让 startScroll 的"初始速度"和 fling 最后一帧的速度对齐，
+                            // 在 DecelerateInterpolator(1.0) 下，
+                            //   初始速度 = 2 * |remaining| / T
+                            // 所以无缝衔接的时长是：
+                            //   T_ideal = 2 * |remaining| / lastVel
+                            //          = 2 * |remaining| * lastFrameGapMs / |lastDelta|
+                            // 这样接管的第一帧 delta ≈ fling 最后一帧 delta，
+                            // 后续单调减速到 0，整体视觉上完全连贯。
+                            int duration;
+                            if (mLastFlingDelta != 0 && mLastFlingFrameGapMs > 0) {
+                                long idealMs = 2L * Math.abs(remaining) * mLastFlingFrameGapMs
+                                        / Math.abs(mLastFlingDelta);
+                                // 太短（<120ms）会看着"啪"一下；太长（>400ms）会有"飘"感
+                                duration = (int) Math.max(120L, Math.min(400L, idealMs));
+                            } else {
+                                duration = Math.max(150,
+                                        Math.min(300, Math.abs(remaining) * 2 + 80));
+                            }
                             mScroller.startScroll(firstStepX, getScrollY(),
                                     remaining, 0, duration);
                             mInEdgeSmoothScroll = true;
@@ -1488,7 +1517,8 @@ public class MyHorizontalScrollView extends FrameLayout {
                                         + " smoothToEdge=" + edgeTarget
                                         + " dur=" + duration + "ms"
                                         + " absorbVel=" + absorbVel
-                                        + " lastDelta=" + mLastFlingDelta);
+                                        + " lastDelta=" + mLastFlingDelta
+                                        + " lastGapMs=" + mLastFlingFrameGapMs);
                             }
                         } else {
                             if (DEBUG_FLING) {
@@ -1504,8 +1534,13 @@ public class MyHorizontalScrollView extends FrameLayout {
                     overScrollBy(x - oldX, y - oldY, oldX, oldY, range, 0,
                             mOverflingDistance, 0, false);
                     onScrollChanged(getScrollX(), getScrollY(), oldX, oldY);
-                    // 仅在"正常 fling 帧"（非接管帧）更新 delta 历史
+                    // 仅在"正常 fling 帧"（非接管帧）更新 delta / 帧间隔历史，
+                    // 用于边界接管时按 v = |delta|/gap 反推 fling 末速，无缝衔接 startScroll
                     mLastFlingDelta = x - oldX;
+                    if (frameGapMs > 0L && frameGapMs <= 50L) {
+                        // 过滤掉首帧（gap=0）和明显丢帧（>50ms），避免污染速度估算
+                        mLastFlingFrameGapMs = frameGapMs;
+                    }
                 }
 
                 // scroller 跑完了，无论是 fling 自然结束还是接管后的 startScroll 走完，
@@ -1834,13 +1869,14 @@ public class MyHorizontalScrollView extends FrameLayout {
 
             int maxScroll = Math.max(0, right - width);
 
-            // 每次 fling 开始：重置边界平滑接管状态 & 最近 delta 历史
+            // 每次 fling 开始：重置边界平滑接管状态 & 最近 delta/帧间隔历史
             mInEdgeSmoothScroll = false;
             mLastFlingDelta = 0;
+            mLastFlingFrameGapMs = 0L;
+            mLastComputeScrollTs = 0L;
 
             if (DEBUG_FLING) {
                 mDbgFlingStartVel = Math.abs(velocityX);
-                mDbgLastComputeScrollTs = 0L; // reset 帧间隔计时
                 Log.i(TAG, "[FLING-DBG][fling] >>> START"
                         + " velocityX=" + velocityX
                         + " scrollX=" + getScrollX()
