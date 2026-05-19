@@ -283,7 +283,7 @@ class MainActivity : AppCompatActivity() {
         mBinding.trackHeader.layoutParams.width = width/2
         mBinding.trackTailer.layoutParams.width = width/2
         mBinding.trackContent.layoutParams.width = width * 3
-        mBinding.trackScrollView.add
+//        mBinding.trackScrollView.add
 
 
 

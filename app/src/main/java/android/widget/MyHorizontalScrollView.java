@@ -16,6 +16,7 @@
 
 package android.widget;
 
+///  android.widget.MyHorizontalScrollView
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.TypedArray;
@@ -165,7 +166,7 @@ public class MyHorizontalScrollView extends FrameLayout {
     }
 
     public MyHorizontalScrollView(Context context, AttributeSet attrs) {
-        this(context, attrs, com.android.internal.R.attr.horizontalScrollViewStyle);
+        this(context, attrs, android.R.attr.horizontalScrollViewStyle);
     }
 
     public MyHorizontalScrollView(Context context, AttributeSet attrs, int defStyleAttr) {
@@ -179,14 +180,17 @@ public class MyHorizontalScrollView extends FrameLayout {
         mEdgeGlowRight = new MyEdgeEffect(context, attrs);
         initScrollView();
 
-        final TypedArray a = context.obtainStyledAttributes(
-                attrs, android.R.styleable.HorizontalScrollView, defStyleAttr, defStyleRes);
-        saveAttributeDataForStyleable(context, android.R.styleable.HorizontalScrollView,
-                attrs, a, defStyleAttr, defStyleRes);
-
-        setFillViewport(a.getBoolean(android.R.styleable.HorizontalScrollView_fillViewport, false));
-
-        a.recycle();
+        // 安全地获取 android:fillViewport 属性值
+        // 使用公开的 android.R.attr.fillViewport 资源 ID，并手动解析
+        if (attrs != null) {
+            // 方法1：通过 obtainStyledAttributes 只获取我们需要的属性
+            TypedArray a = context.obtainStyledAttributes(attrs,
+                    new int[]{ android.R.attr.fillViewport },
+                    defStyleAttr, defStyleRes);
+            boolean fillViewport = a.getBoolean(0, false);
+            a.recycle();
+            setFillViewport(fillViewport);
+        }
 
         if (context.getResources().getConfiguration().uiMode == Configuration.UI_MODE_TYPE_WATCH) {
             setRevealOnFocusHint(false);

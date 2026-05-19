@@ -27,10 +27,13 @@ import android.graphics.Rect;
 import android.graphics.RenderNode;
 import android.os.Build;
 import android.util.AttributeSet;
+import android.util.TypedValue;
 import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.Interpolator;
 
+import androidx.annotation.ColorInt;
+import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.resources.Compatibility;
@@ -62,8 +65,6 @@ public class MyEdgeEffect {
      *
      * @hide
      */
-    @ChangeId
-    @EnabledSince(targetSdkVersion = Build.VERSION_CODES.BASE)
     public static final long USE_STRETCH_EDGE_EFFECT_BY_DEFAULT = 171228096L;
 
     /**
@@ -174,7 +175,6 @@ public class MyEdgeEffect {
     private static final float RADIUS_FACTOR = 0.6f;
 
     private float mGlowAlpha;
-    @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
     private float mGlowScaleY;
     private float mDistance;
     private float mVelocity; // only for stretch animations
@@ -206,7 +206,6 @@ public class MyEdgeEffect {
     private final Rect mBounds = new Rect();
     private float mWidth;
     private float mHeight;
-    @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.P, trackingBug = 123769450)
     private final Paint mPaint = new Paint();
     private float mRadius;
     private float mBaseGlowScale;
@@ -236,18 +235,41 @@ public class MyEdgeEffect {
      * @param attrs The attributes of the XML tag that is inflating the view
      */
     public MyEdgeEffect(@NonNull Context context, @Nullable AttributeSet attrs) {
-        final TypedArray a = context.obtainStyledAttributes(
+        /*final TypedArray a = context.obtainStyledAttributes(
                 attrs, com.android.internal.R.styleable.EdgeEffect);
         final int themeColor = a.getColor(
                 com.android.internal.R.styleable.EdgeEffect_colorEdgeEffect, 0xff666666);
         mEdgeEffectType = Compatibility.isChangeEnabled(USE_STRETCH_EDGE_EFFECT_BY_DEFAULT)
                 ? TYPE_STRETCH : TYPE_GLOW;
-        a.recycle();
+        a.recycle();*/
+
+
+
+        // 替代内部 TypedArray 解析：我们可以从主题中读取边缘效果颜色
+        // 使用公开的 android.R.attr.colorEdgeEffect（需要 API 31+）
+        int themeColor = 0xff666666; // 默认灰色
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            TypedValue outValue = new TypedValue();
+            if (context.getTheme().resolveAttribute(android.R.attr.colorEdgeEffect, outValue, true)) {
+                themeColor = outValue.data;
+            }
+        }
+
+        // 决定边缘效果类型：GLOW (经典发光) 还是 STRETCH (拉伸)
+        // 内部标志 USE_STRETCH_EDGE_EFFECT_BY_DEFAULT 无法直接获取
+        // 这里简化为：Android 12+ 默认使用拉伸，否则用发光
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
+            mEdgeEffectType = TYPE_STRETCH;
+        } else {
+            mEdgeEffectType = TYPE_GLOW;
+        }
 
         mPaint.setAntiAlias(true);
         mPaint.setColor((themeColor & 0xffffff) | 0x33000000);
         mPaint.setStyle(Paint.Style.FILL);
-        mPaint.setBlendMode(DEFAULT_BLEND_MODE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            mPaint.setBlendMode(DEFAULT_BLEND_MODE);
+        }
     }
 
     @EdgeEffectType
@@ -543,7 +565,9 @@ public class MyEdgeEffect {
      * @param blendmode May be null. The blend mode to be installed in the paint
      */
     public void setBlendMode(@Nullable BlendMode blendmode) {
-        mPaint.setBlendMode(blendmode);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            mPaint.setBlendMode(blendmode);
+        }
     }
 
     /**
@@ -565,7 +589,10 @@ public class MyEdgeEffect {
      */
     @Nullable
     public BlendMode getBlendMode() {
-        return mPaint.getBlendMode();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return mPaint.getBlendMode();
+        }
+        return null;
     }
 
     /**
@@ -581,7 +608,7 @@ public class MyEdgeEffect {
      */
     public boolean draw(Canvas canvas) {
         int edgeEffectBehavior = getCurrentEdgeEffectBehavior();
-        if (edgeEffectBehavior == TYPE_GLOW) {
+        if (edgeEffectBehavior == TYPE_GLOW || edgeEffectBehavior == TYPE_STRETCH ) {
             update();
             final int count = canvas.save();
 
@@ -598,62 +625,6 @@ public class MyEdgeEffect {
             mPaint.setAlpha((int) (0xff * mGlowAlpha));
             canvas.drawCircle(centerX, centerY, mRadius, mPaint);
             canvas.restoreToCount(count);
-        } else if (edgeEffectBehavior == TYPE_STRETCH && canvas instanceof RecordingCanvas) {
-            if (mState == STATE_RECEDE) {
-                updateSpring();
-            }
-            if (mDistance != 0f) {
-                RecordingCanvas recordingCanvas = (RecordingCanvas) canvas;
-                if (mTmpMatrix == null) {
-                    mTmpMatrix = new Matrix();
-                    mTmpPoints = new float[12];
-                }
-                //noinspection deprecation
-                recordingCanvas.getMatrix(mTmpMatrix);
-
-                mTmpPoints[0] = 0;
-                mTmpPoints[1] = 0; // top-left
-                mTmpPoints[2] = mWidth;
-                mTmpPoints[3] = 0; // top-right
-                mTmpPoints[4] = mWidth;
-                mTmpPoints[5] = mHeight; // bottom-right
-                mTmpPoints[6] = 0;
-                mTmpPoints[7] = mHeight; // bottom-left
-                mTmpPoints[8] = mWidth * mDisplacement;
-                mTmpPoints[9] = 0; // drag start point
-                mTmpPoints[10] = mWidth * mDisplacement;
-                mTmpPoints[11] = mHeight * mDistance; // drag point
-                mTmpMatrix.mapPoints(mTmpPoints);
-
-                RenderNode renderNode = recordingCanvas.mNode;
-
-                float left = renderNode.getLeft()
-                        + min(mTmpPoints[0], mTmpPoints[2], mTmpPoints[4], mTmpPoints[6]);
-                float top = renderNode.getTop()
-                        + min(mTmpPoints[1], mTmpPoints[3], mTmpPoints[5], mTmpPoints[7]);
-                float right = renderNode.getLeft()
-                        + max(mTmpPoints[0], mTmpPoints[2], mTmpPoints[4], mTmpPoints[6]);
-                float bottom = renderNode.getTop()
-                        + max(mTmpPoints[1], mTmpPoints[3], mTmpPoints[5], mTmpPoints[7]);
-                // assume rotations of increments of 90 degrees
-                float x = mTmpPoints[10] - mTmpPoints[8];
-                float width = right - left;
-                float vecX = dampStretchVector(Math.max(-1f, Math.min(1f, x / width)));
-
-                float y = mTmpPoints[11] - mTmpPoints[9];
-                float height = bottom - top;
-                float vecY = dampStretchVector(Math.max(-1f, Math.min(1f, y / height)));
-
-                boolean hasValidVectors = Float.isFinite(vecX) && Float.isFinite(vecY);
-                if (right > left && bottom > top && mWidth > 0 && mHeight > 0 && hasValidVectors) {
-                    renderNode.stretch(
-                            vecX, // horizontal stretch intensity
-                            vecY, // vertical stretch intensity
-                            mWidth, // max horizontal stretch in pixels
-                            mHeight // max vertical stretch in pixels
-                    );
-                }
-            }
         } else {
             // Animations have been disabled or this is TYPE_STRETCH and drawing into a Canvas
             // that isn't a Recording Canvas, so no effect can be shown. Just end the effect.
