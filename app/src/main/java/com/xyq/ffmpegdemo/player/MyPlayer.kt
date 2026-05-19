@@ -9,6 +9,7 @@ import android.media.audiofx.Visualizer
 import android.opengl.GLSurfaceView
 import android.util.Log
 import android.view.Surface
+import android.widget.Toast
 import com.xyq.libffplayer.entity.MediaInfo
 import com.xyq.libbase.player.IPlayer
 import com.xyq.libbase.player.IPlayerListener
@@ -25,6 +26,8 @@ import com.xyq.librender.filter.RadiusCornerFilter
 import com.xyq.librender.model.FrameBuffer
 import com.xyq.librender.model.RenderData
 import com.xyq.libutils.CommonUtils
+import java.io.File
+import java.io.FileNotFoundException
 import java.nio.ByteBuffer
 import java.util.*
 import javax.microedition.khronos.egl.EGLConfig
@@ -137,7 +140,17 @@ class MyPlayer(private val mContext: Context,
     override fun prepare(path: String, config: PlayerConfig, isVideo: Boolean) {
         Log.i(TAG, "prepare: $path, isVideo: $isVideo")
         if (path.isEmpty()) {
-            throw IllegalStateException("must first call setDataSource")
+            throw IllegalArgumentException("Path cannot be empty")
+        }
+
+        // 检查文件是否存在
+        val file = File(path)
+        if (!file.exists()) {
+            throw FileNotFoundException("File not found: $path")
+        }
+
+        if (!file.isFile) {
+            throw IllegalArgumentException("Path is not a file: $path")
         }
 
         val start = System.currentTimeMillis()

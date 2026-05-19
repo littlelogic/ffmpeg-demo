@@ -133,6 +133,7 @@
 
     <HorizontalScrollView
         android:background="#000000"
+        android:id="@+id/trackScrollView"
         app:layout_constraintBottom_toBottomOf="parent"
         android:layout_marginBottom="80dp"
         android:layout_width="match_parent"

@@ -41,6 +41,8 @@ import com.xyq.libmediapicker.entity.Media
 import com.xyq.librender.filter.GreyFilter
 import com.xyq.libutils.CommonUtils
 import com.xyq.libutils.FileUtils
+import java.io.File
+import java.io.FileNotFoundException
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -281,6 +283,11 @@ class MainActivity : AppCompatActivity() {
         mBinding.trackHeader.layoutParams.width = width/2
         mBinding.trackTailer.layoutParams.width = width/2
         mBinding.trackContent.layoutParams.width = width * 3
+        mBinding.trackScrollView.add
+
+
+
+
 
         val layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         mBinding.videoThumbnails.layoutManager = layoutManager
@@ -398,6 +405,22 @@ class MainActivity : AppCompatActivity() {
             val config = PlayerConfig().apply {
                 decodeConfig = PlayerConfig.DecodeConfig.USE_FF_HW_DECODER
             }
+            if (path.isEmpty()) {
+                Toast.makeText(this@MainActivity,"Path cannot be empty",Toast.LENGTH_SHORT).show()
+                return@submit
+            }
+
+            // 检查文件是否存在
+            val file = File(path)
+            if (!file.exists()) {
+                Toast.makeText(this@MainActivity,"File not found: $path",Toast.LENGTH_SHORT).show()
+                return@submit
+            }
+            if (!file.isFile) {
+                Toast.makeText(this@MainActivity,"Path is not a file: $path",Toast.LENGTH_SHORT).show()
+                return@submit
+            }
+
             mPlayer.prepare(path, config, isVideo)
             val defaultGreyVal = if (isVideo) 0.5f else 0.0f
             (mPlayer as MyPlayer).updateFilterEffect(GreyFilter.VAL_PROGRESS, defaultGreyVal)
