@@ -41,9 +41,11 @@ import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
 
 import androidx.annotation.ColorInt;
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 import androidx.viewpager.widget.ViewPager;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -186,6 +188,29 @@ public class MyHorizontalScrollView extends FrameLayout {
     private static final int INVALID_POINTER = -1;
 
     private ViewPager.SavedState mSavedState;
+
+    // ===================== Scroll listener (RecyclerView 风格) =====================
+    /** 静止：既没有手指拖动，scroller 也跑完了。 */
+    public static final int SCROLL_STATE_IDLE = 0;
+    /** 用户手指正在拖动。 */
+    public static final int SCROLL_STATE_DRAGGING = 1;
+    /** 无手指但 scroller 还在跑：fling / springBack / smoothScrollBy / 边界接管 startScroll。 */
+    public static final int SCROLL_STATE_SETTLING = 2;
+
+    /** 当前滚动状态，单一入口由 {@link #setScrollState(int)} 修改并分发。 */
+    private int mScrollState = SCROLL_STATE_IDLE;
+    /** 监听器列表；首次添加时懒初始化以避免无监听场景下的内存开销。 */
+    private List<OnScrollListener> mScrollListeners;
+
+    /**
+     * 滚动监听接口，语义对齐 RecyclerView.OnScrollListener：
+     * - {@link #onScrollStateChanged(MyHorizontalScrollView, int)} 状态切换（IDLE/DRAGGING/SETTLING）
+     * - {@link #onScrolled(MyHorizontalScrollView, int, int)} 每次 scrollX/Y 变化触发
+     */
+    public static abstract class OnScrollListener {
+        public void onScrollStateChanged(@NonNull MyHorizontalScrollView view, int newState) {}
+        public void onScrolled(@NonNull MyHorizontalScrollView view, int dx, int dy) {}
+    }
 
     public MyHorizontalScrollView(Context context) {
         this(context, null);
@@ -347,6 +372,81 @@ public class MyHorizontalScrollView extends FrameLayout {
         mOverscrollDistance = configuration.getScaledOverscrollDistance();
         mOverflingDistance = configuration.getScaledOverflingDistance();
         mHorizontalScrollFactor = configuration.getScaledHorizontalScrollFactor();
+    }
+
+    // ============================================================================
+    // Scroll listener API（RecyclerView 风格）
+    // ============================================================================
+
+    /**
+     * 添加一个滚动监听器。可以添加多个。回调线程为 UI 线程。
+     */
+    public void addOnScrollListener(@NonNull OnScrollListener listener) {
+        if (mScrollListeners == null) {
+            mScrollListeners = new ArrayList<>(1);
+        }
+        mScrollListeners.add(listener);
+    }
+
+    /** 移除指定的监听器。 */
+    public void removeOnScrollListener(@NonNull OnScrollListener listener) {
+        if (mScrollListeners != null) {
+            mScrollListeners.remove(listener);
+        }
+    }
+
+    /** 清空所有监听器。 */
+    public void clearOnScrollListeners() {
+        if (mScrollListeners != null) {
+            mScrollListeners.clear();
+        }
+    }
+
+    /** 当前滚动状态：{@link #SCROLL_STATE_IDLE} / {@link #SCROLL_STATE_DRAGGING} / {@link #SCROLL_STATE_SETTLING}。 */
+    public int getScrollState() {
+        return mScrollState;
+    }
+
+    /**
+     * 修改当前滚动状态，并向所有监听器分发。
+     * 单一写入入口，保证状态机不被多处直接覆盖；同状态写入自动去重。
+     */
+    private void setScrollState(int newState) {
+        if (mScrollState == newState) {
+            return;
+        }
+        mScrollState = newState;
+        dispatchOnScrollStateChanged(newState);
+    }
+
+    private void dispatchOnScrollStateChanged(int state) {
+        if (mScrollListeners == null) {
+            return;
+        }
+        // 倒序遍历以允许 listener 在回调中 remove 自身或后置 listener
+        for (int i = mScrollListeners.size() - 1; i >= 0; i--) {
+            mScrollListeners.get(i).onScrollStateChanged(this, state);
+        }
+    }
+
+    private void dispatchOnScrolled(int dx, int dy) {
+        if (mScrollListeners == null) {
+            return;
+        }
+        for (int i = mScrollListeners.size() - 1; i >= 0; i--) {
+            mScrollListeners.get(i).onScrolled(this, dx, dy);
+        }
+    }
+
+    /**
+     * 覆写 {@link View#onScrollChanged(int, int, int, int)} 作为唯一的 onScrolled 分发入口。
+     * 所有路径（手指拖动 / fling / springBack / smoothScrollBy / 边界接管 startScroll / 主动 scrollTo）
+     * 最终都会走到 View.scrollTo → onScrollChanged，所以这里一处覆写即可覆盖全部。
+     */
+    @Override
+    protected void onScrollChanged(int l, int t, int oldl, int oldt) {
+        super.onScrollChanged(l, t, oldl, oldt);
+        dispatchOnScrolled(l - oldl, t - oldt);
     }
 
     @Override
@@ -624,6 +724,7 @@ public class MyHorizontalScrollView extends FrameLayout {
                 final int xDiff = (int) Math.abs(x - mLastMotionX);
                 if (xDiff > mTouchSlop) {
                     mIsBeingDragged = true;
+                    setScrollState(SCROLL_STATE_DRAGGING);
                     mLastMotionX = x;
                     initVelocityTrackerIfNotExists();
                     mVelocityTracker.addMovement(ev);
@@ -657,6 +758,10 @@ public class MyHorizontalScrollView extends FrameLayout {
                  */
                 mIsBeingDragged = !mScroller.isFinished() || !mEdgeGlowLeft.isFinished()
                         || !mEdgeGlowRight.isFinished();
+                if (mIsBeingDragged) {
+                    // 抓住正在跑的 fling / EdgeGlow，状态进 DRAGGING
+                    setScrollState(SCROLL_STATE_DRAGGING);
+                }
                 // Catch the edge effect if it is active.
                 if (!mEdgeGlowLeft.isFinished()) {
                     mEdgeGlowLeft.onPullDistance(0f, 1f - ev.getY() / getHeight());
@@ -673,7 +778,10 @@ public class MyHorizontalScrollView extends FrameLayout {
                 mIsBeingDragged = false;
                 mActivePointerId = INVALID_POINTER;
                 if (mScroller.springBack(getScrollX(), getScrollY(), 0, getScrollRange(), 0, 0)) {
+                    setScrollState(SCROLL_STATE_SETTLING);
                     postInvalidateOnAnimation();
+                } else {
+                    setScrollState(SCROLL_STATE_IDLE);
                 }
                 break;
             case MotionEvent.ACTION_POINTER_DOWN: {
@@ -742,6 +850,7 @@ public class MyHorizontalScrollView extends FrameLayout {
                         parent.requestDisallowInterceptTouchEvent(true);
                     }
                     mIsBeingDragged = true;
+                    setScrollState(SCROLL_STATE_DRAGGING);
                     if (deltaX > 0) {
                         deltaX -= mTouchSlop;
                     } else {
@@ -806,12 +915,18 @@ public class MyHorizontalScrollView extends FrameLayout {
                     velocityTracker.computeCurrentVelocity(1000, mMaximumVelocity);
                     int initialVelocity = (int) velocityTracker.getXVelocity(mActivePointerId);
 
+                    // 跟踪是否真的进入 SETTLING（fling 启动或 springBack 启动都算）；
+                    // 否则离开手指后直接回到 IDLE。
+                    boolean enterSettling = false;
                     if (getChildCount() > 0) {
                         if ((Math.abs(initialVelocity) > mMinimumVelocity)) {
                             fling(-initialVelocity);
+                            // fling() 内部已经在真正启动后 setScrollState(SETTLING)，这里只标记
+                            enterSettling = true;
                         } else {
                             if (mScroller.springBack(getScrollX(), getScrollY(), 0,
                                     getScrollRange(), 0, 0)) {
+                                enterSettling = true;
                                 postInvalidateOnAnimation();
                             }
                         }
@@ -819,6 +934,11 @@ public class MyHorizontalScrollView extends FrameLayout {
 
                     mActivePointerId = INVALID_POINTER;
                     mIsBeingDragged = false;
+                    if (enterSettling) {
+                        setScrollState(SCROLL_STATE_SETTLING);
+                    } else {
+                        setScrollState(SCROLL_STATE_IDLE);
+                    }
                     recycleVelocityTracker();
 
                     if (shouldDisplayEdgeEffects()) {
@@ -829,11 +949,18 @@ public class MyHorizontalScrollView extends FrameLayout {
                 break;
             case MotionEvent.ACTION_CANCEL:
                 if (mIsBeingDragged && getChildCount() > 0) {
-                    if (mScroller.springBack(getScrollX(), getScrollY(), 0, getScrollRange(), 0, 0)) {
+                    boolean enterSettling = mScroller.springBack(
+                            getScrollX(), getScrollY(), 0, getScrollRange(), 0, 0);
+                    if (enterSettling) {
                         postInvalidateOnAnimation();
                     }
                     mActivePointerId = INVALID_POINTER;
                     mIsBeingDragged = false;
+                    if (enterSettling) {
+                        setScrollState(SCROLL_STATE_SETTLING);
+                    } else {
+                        setScrollState(SCROLL_STATE_IDLE);
+                    }
                     recycleVelocityTracker();
 
                     if (shouldDisplayEdgeEffects()) {
@@ -1297,6 +1424,7 @@ public class MyHorizontalScrollView extends FrameLayout {
             dx = Math.max(0, Math.min(scrollX + dx, maxX)) - scrollX;
 
             mScroller.startScroll(scrollX, getScrollY(), dx, 0);
+            setScrollState(SCROLL_STATE_SETTLING);
             postInvalidateOnAnimation();
         } else {
             if (!mScroller.isFinished()) {
@@ -1477,9 +1605,10 @@ public class MyHorizontalScrollView extends FrameLayout {
                         }
                         int firstStepDelta = firstStepX - oldX;
                         if (firstStepDelta != 0) {
+                            // overScrollBy -> onOverScrolled -> super.scrollTo(View.scrollTo)
+                            // 已经自动触发 onScrollChanged，这里不再手动调用以避免 onScrolled 双发。
                             overScrollBy(firstStepDelta, 0, oldX, 0, range, 0,
                                     mOverflingDistance, 0, false);
-                            onScrollChanged(getScrollX(), getScrollY(), oldX, oldY);
                         }
 
                         // 把剩到边界这段换成 startScroll 平滑插值
@@ -1531,9 +1660,10 @@ public class MyHorizontalScrollView extends FrameLayout {
                 }
 
                 if (!handledEdgeTransition) {
+                    // overScrollBy -> onOverScrolled -> super.scrollTo(View.scrollTo)
+                    // 已经自动触发 onScrollChanged，这里不再手动调用以避免 onScrolled 双发。
                     overScrollBy(x - oldX, y - oldY, oldX, oldY, range, 0,
                             mOverflingDistance, 0, false);
-                    onScrollChanged(getScrollX(), getScrollY(), oldX, oldY);
                     // 仅在"正常 fling 帧"（非接管帧）更新 delta / 帧间隔历史，
                     // 用于边界接管时按 v = |delta|/gap 反推 fling 末速，无缝衔接 startScroll
                     mLastFlingDelta = x - oldX;
@@ -1545,8 +1675,12 @@ public class MyHorizontalScrollView extends FrameLayout {
 
                 // scroller 跑完了，无论是 fling 自然结束还是接管后的 startScroll 走完，
                 // 都解除接管标记，让下一次 fling 能正常工作。
+                // 同时：若当前是 SETTLING 状态且用户没在拖动，转回 IDLE 并触发监听。
                 if (mScroller.isFinished()) {
                     mInEdgeSmoothScroll = false;
+                    if (!mIsBeingDragged && mScrollState == SCROLL_STATE_SETTLING) {
+                        setScrollState(SCROLL_STATE_IDLE);
+                    }
                 }
             }
 
@@ -1892,6 +2026,7 @@ public class MyHorizontalScrollView extends FrameLayout {
             } else {
                 mScroller.fling(getScrollX(), getScrollY(), velocityX, 0, 0,
                         maxScroll, 0, 0, width / 2, 0);
+                setScrollState(SCROLL_STATE_SETTLING);
 
                 if (DEBUG_FLING) {
                     Log.i(TAG, "[FLING-DBG][fling] scroller started"

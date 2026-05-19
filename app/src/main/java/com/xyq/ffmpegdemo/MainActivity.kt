@@ -10,6 +10,7 @@ import android.os.Environment
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.widget.MyHorizontalScrollView
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
@@ -20,6 +21,7 @@ import androidx.core.content.PermissionChecker
 import androidx.core.content.res.ResourcesCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.badlogic.utils.ALog
 import com.donkingliang.imageselector2.ImageSelectorActivity
 import com.donkingliang.imageselector2.entry.RequestConfig
 import com.donkingliang.imageselector2.model.ImageModel
@@ -42,7 +44,6 @@ import com.xyq.librender.filter.GreyFilter
 import com.xyq.libutils.CommonUtils
 import com.xyq.libutils.FileUtils
 import java.io.File
-import java.io.FileNotFoundException
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -286,6 +287,39 @@ class MainActivity : AppCompatActivity() {
 //        mBinding.trackScrollView.add
 
 
+        mBinding.trackScrollView.addOnScrollListener(object : MyHorizontalScrollView.OnScrollListener() {
+            override fun onScrollStateChanged(view: MyHorizontalScrollView, newState: Int) {
+                when (newState) {
+                    MyHorizontalScrollView.SCROLL_STATE_IDLE -> {
+                        // fling 结束 / 用户离手且没启动惯性
+                        ALog.i("MainActivity-trackScrollView-onScrollStateChanged-SCROLL_STATE_IDLE"
+                                    + " fling 结束 / 用户离手且没启动惯性"
+                        )
+                    }
+                    MyHorizontalScrollView.SCROLL_STATE_DRAGGING -> {
+                        // 用户手指正在拖动
+                        ALog.i("MainActivity-trackScrollView-onScrollStateChanged-SCROLL_STATE_DRAGGING"
+                                + " 用户手指正在拖动"
+                        )
+                    }
+                    MyHorizontalScrollView.SCROLL_STATE_SETTLING -> {
+                        // fling / springBack / smoothScrollBy 中
+                        ALog.i("MainActivity-trackScrollView-onScrollStateChanged-SCROLL_STATE_SETTLING"
+                                + " fling / springBack / smoothScrollBy 中"
+                        )
+                    }
+                }
+            }
+
+            override fun onScrolled(view: MyHorizontalScrollView, dx: Int, dy: Int) {
+                // dx > 0 表示内容向右移动（scrollX 增大）
+                // dy 在 HorizontalScrollView 里几乎总是 0
+                ALog.i("MainActivity-trackScrollView-onScrollStateChanged-onScrolled"
+                        + " dx" + dx
+                        + " dy" + dy
+                )
+            }
+        })
 
 
 
