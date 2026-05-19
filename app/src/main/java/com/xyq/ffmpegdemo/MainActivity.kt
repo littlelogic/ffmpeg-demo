@@ -22,6 +22,7 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.badlogic.utils.ALog
+import com.badlogic.utils.Tools
 import com.donkingliang.imageselector2.ImageSelectorActivity
 import com.donkingliang.imageselector2.entry.RequestConfig
 import com.donkingliang.imageselector2.model.ImageModel
@@ -92,6 +93,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        Tools.setApplication(this.application)
+        ALog.setMark(Tools.isApkDebugable(application))
         Log.i(TAG, "onCreate: ")
         mBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(mBinding.root)
@@ -314,10 +317,21 @@ class MainActivity : AppCompatActivity() {
             override fun onScrolled(view: MyHorizontalScrollView, dx: Int, dy: Int) {
                 // dx > 0 表示内容向右移动（scrollX 增大）
                 // dy 在 HorizontalScrollView 里几乎总是 0
+
+                val per = mBinding.trackScrollView.scrollX/(mBinding.trackContentView.width - view.width).toFloat()
                 ALog.i("MainActivity-trackScrollView-onScrollStateChanged-onScrolled"
+                        + " per" + per
                         + " dx" + dx
-                        + " dy" + dy
+                        + " scrollX" + mBinding.trackScrollView.scrollX
+                        + " trackScrollView.width" + view.width
+                        + " trackContentView.width" + mBinding.trackContentView.width
                 )
+
+
+                val timestamp = per * mDuration
+                mPlayer.seek(timestamp)
+
+
             }
         })
 
