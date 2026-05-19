@@ -131,7 +131,7 @@
     </androidx.constraintlayout.widget.ConstraintLayout>
 
 
-    <HorizontalScrollView
+    <android.widget.MyHorizontalScrollView
         android:background="#000000"
         android:id="@+id/trackScrollView"
         app:layout_constraintBottom_toBottomOf="parent"
@@ -176,7 +176,7 @@
         </LinearLayout>
 
 
-    </HorizontalScrollView>
+    </android.widget.MyHorizontalScrollView>
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>

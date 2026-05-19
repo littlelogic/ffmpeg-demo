@@ -73,6 +73,25 @@ public class MyHorizontalScrollView extends FrameLayout {
 
     private static final String TAG = "HorizontalScrollView";
 
+    /** ★ fling 跳变排查开关。排查完成后改为 false。所有日志统一前缀 "[FLING-DBG]"。 */
+    private static final boolean DEBUG_FLING = true;
+
+    /** 仅在 DEBUG_FLING 期间使用：记录上一次 computeScroll 的实际时间戳，用于检测主线程"丢帧" */
+    private long mDbgLastComputeScrollTs = 0L;
+    /** 仅在 DEBUG_FLING 期间使用：记录最近一次 fling 启动时的初速度（绝对值） */
+    private int mDbgFlingStartVel = 0;
+
+    /**
+     * ★ 边界平滑接管标记。在 SPLINE→BALLISTIC 转折帧检测到大跳后置 true，
+     *   用 startScroll 平滑滑到边界期间避免重复触发，scroller 完结时回 false。
+     */
+    private boolean mInEdgeSmoothScroll = false;
+    /**
+     * ★ 最近一次"正常 fling 帧"的位移增量（带符号）。
+     *   边界转折帧若有历史 delta，第一步先按它推进一小步，再交给 startScroll，平滑度更好。
+     */
+    private int mLastFlingDelta = 0;
+
     private long mLastScroll;
 
     private final Rect mTempRect = new Rect();
@@ -882,15 +901,29 @@ public class MyHorizontalScrollView extends FrameLayout {
     @Override
     protected void onOverScrolled(int scrollX, int scrollY,
                                   boolean clampedX, boolean clampedY) {
-        // Treat animating scrolls differently; see #computeScroll() for why.
+        if (DEBUG_FLING && (clampedX || clampedY)) {
+            Log.d(TAG, "[FLING-DBG][onOverScrolled]"
+                    + " scrollX=" + scrollX
+                    + " clampedX=" + clampedX
+                    + " range=" + getScrollRange()
+                    + " scrollerFinished=" + mScroller.isFinished()
+                    + " scrollerCurrX=" + mScroller.getCurrX()
+                    + " scrollerFinalX=" + mScroller.getFinalX());
+        }
+        // ★ 修复"fling 末段猛地到底"：
+        // 原版直接 setScrollX/setScrollY 会绕回本类被 override 的 scrollTo() 走 clamp,
+        // 把 View.overScrollBy 留出的过冲缓冲（mOverflingDistance）一巴掌打到 range，
+        // 导致 over-fling 阶段 scrollX 从中段瞬间钉死到 maxScroll。
+        // 等价做法：直接 super.scrollTo(...) —— 它是 View.scrollTo, 不经我们的 clamp，
+        // 行为对应 AOSP HorizontalScrollView 包内直写 mScrollX/mScrollY 的语义。
         if (!mScroller.isFinished()) {
-            final int oldX = getScrollX();
-            final int oldY = getScrollY();
-            setScrollX(scrollX);
-            setScrollY(scrollY);
+            super.scrollTo(scrollX, scrollY);
             invalidateParentIfNeeded();
-            onScrollChanged(getScrollX(), getScrollY(), oldX, oldY);
             if (clampedX) {
+                if (DEBUG_FLING) {
+                    Log.d(TAG, "[FLING-DBG][onOverScrolled] springBack triggered curX=" + getScrollX()
+                            + " range=" + getScrollRange());
+                }
                 mScroller.springBack(getScrollX(), getScrollY(), 0, getScrollRange(), 0, 0);
             }
         } else {
@@ -1363,16 +1396,122 @@ public class MyHorizontalScrollView extends FrameLayout {
                 final boolean canOverscroll = overscrollMode == OVER_SCROLL_ALWAYS ||
                         (overscrollMode == OVER_SCROLL_IF_CONTENT_SCROLLS && range > 0);
 
-                overScrollBy(x - oldX, y - oldY, oldX, oldY, range, 0,
-                        mOverflingDistance, 0, false);
-                onScrollChanged(getScrollX(), getScrollY(), oldX, oldY);
+                if (DEBUG_FLING) {
+                    final int delta = x - oldX;
+                    final long nowTs = AnimationUtils.currentAnimationTimeMillis();
+                    final long frameGapMs = (mDbgLastComputeScrollTs == 0L)
+                            ? 0L : (nowTs - mDbgLastComputeScrollTs);
+                    mDbgLastComputeScrollTs = nowTs;
+                    final boolean suspiciousJump = Math.abs(delta) > 200; // 单帧位移过大
+                    final boolean jankFrame = frameGapMs > 33L;           // > 2 个 16.7ms 帧
+                    Log.d(TAG, "[FLING-DBG][computeScroll]"
+                            + " oldX=" + oldX
+                            + " currX=" + x
+                            + " delta=" + delta
+                            + " range=" + range
+                            + " finalX=" + mScroller.getFinalX()
+                            + " velocity=" + (int) mScroller.getCurrVelocity()
+                            + " flingStartVel=" + mDbgFlingStartVel
+                            + " gapMs=" + frameGapMs
+                            + " finished=" + mScroller.isFinished()
+                            + (suspiciousJump ? "  *** BIG-DELTA ***" : "")
+                            + (jankFrame ? "  *** JANK-FRAME ***" : ""));
+                }
 
-                if (canOverscroll) {
+                // ★ 修复"高速 fling 末端单帧蹦到对岸"：
+                // OverScroller 在 SPLINE 被 adjustDuration 缩短后，转折 tick 里会直接
+                // `mCurrentPosition = mFinal = 边界`，再立刻切到 BALLISTIC 多跑几像素，
+                // 于是一帧位移 ~100-200px（你这次 148 → -4 = 152px，前次 178 → -6 = 184px）。
+                //
+                // 仅"钉在边界 + abort"还不够——view 仍然要跨过几十~上百像素那一帧，依然"猛"。
+                // 真正稳的做法是接管那一帧，让 OverScroller 的"瞬移到 mFinal"被替换成：
+                //   1) 这一帧推一小步（沿用上一帧的正常 delta），不让 view 卡死不动；
+                //   2) 把剩到边界这段距离改用 startScroll 做平滑插值（ViscousFluid/Decelerate），
+                //      不再走 SPLINE→BALLISTIC 那条位置不连续的路径；
+                //   3) EdgeGlow.onAbsorb 把残速变成发光"溅起"，保留撞边界反馈。
+                boolean handledEdgeTransition = false;
+                if (canOverscroll && !mInEdgeSmoothScroll) {
+                    int edgeTarget = -1;          // 目标边界（0 = 左，range = 右），-1 = 没触发
+                    int absorbVel = 0;
                     if (x < 0 && oldX >= 0) {
-                        mEdgeGlowLeft.onAbsorb((int) mScroller.getCurrVelocity());
+                        edgeTarget = 0;
+                        absorbVel = (int) mScroller.getCurrVelocity();
                     } else if (x > range && oldX <= range) {
-                        mEdgeGlowRight.onAbsorb((int) mScroller.getCurrVelocity());
+                        edgeTarget = range;
+                        absorbVel = (int) mScroller.getCurrVelocity();
                     }
+                    if (edgeTarget >= 0) {
+                        handledEdgeTransition = true;
+                        // EdgeGlow 接残速
+                        if (edgeTarget == 0) {
+                            mEdgeGlowLeft.onAbsorb(absorbVel);
+                        } else {
+                            mEdgeGlowRight.onAbsorb(absorbVel);
+                        }
+
+                        // 第一小步：沿用上一帧 delta（带符号），但不要越过边界
+                        int firstStepX;
+                        if (mLastFlingDelta != 0) {
+                            firstStepX = oldX + mLastFlingDelta;
+                            if (edgeTarget == 0) {
+                                firstStepX = Math.max(0, firstStepX);
+                            } else {
+                                firstStepX = Math.min(range, firstStepX);
+                            }
+                        } else {
+                            firstStepX = oldX;
+                        }
+                        int firstStepDelta = firstStepX - oldX;
+                        if (firstStepDelta != 0) {
+                            overScrollBy(firstStepDelta, 0, oldX, 0, range, 0,
+                                    mOverflingDistance, 0, false);
+                            onScrollChanged(getScrollX(), getScrollY(), oldX, oldY);
+                        }
+
+                        // 把剩到边界这段换成 startScroll 平滑插值
+                        int remaining = edgeTarget - firstStepX;
+                        mScroller.abortAnimation();
+                        if (remaining != 0) {
+                            // 时长根据剩余距离选 150~300ms，距离越大时长越长（避免短距离也滑很久）
+                            int duration = Math.max(150,
+                                    Math.min(300, Math.abs(remaining) * 2 + 80));
+                            mScroller.startScroll(firstStepX, getScrollY(),
+                                    remaining, 0, duration);
+                            mInEdgeSmoothScroll = true;
+                            if (DEBUG_FLING) {
+                                Log.w(TAG, "[FLING-DBG][computeScroll]"
+                                        + " *** EDGE-TRANSITION HANDLED ("
+                                        + (edgeTarget == 0 ? "left" : "right") + ") ***"
+                                        + " oldX=" + oldX
+                                        + " rawCurrX=" + x
+                                        + " firstStepX=" + firstStepX
+                                        + " smoothToEdge=" + edgeTarget
+                                        + " dur=" + duration + "ms"
+                                        + " absorbVel=" + absorbVel
+                                        + " lastDelta=" + mLastFlingDelta);
+                            }
+                        } else {
+                            if (DEBUG_FLING) {
+                                Log.w(TAG, "[FLING-DBG][computeScroll]"
+                                        + " *** EDGE-TRANSITION HANDLED (no glide needed) ***"
+                                        + " edge=" + edgeTarget);
+                            }
+                        }
+                    }
+                }
+
+                if (!handledEdgeTransition) {
+                    overScrollBy(x - oldX, y - oldY, oldX, oldY, range, 0,
+                            mOverflingDistance, 0, false);
+                    onScrollChanged(getScrollX(), getScrollY(), oldX, oldY);
+                    // 仅在"正常 fling 帧"（非接管帧）更新 delta 历史
+                    mLastFlingDelta = x - oldX;
+                }
+
+                // scroller 跑完了，无论是 fling 自然结束还是接管后的 startScroll 走完，
+                // 都解除接管标记，让下一次 fling 能正常工作。
+                if (mScroller.isFinished()) {
+                    mInEdgeSmoothScroll = false;
                 }
             }
 
@@ -1394,6 +1533,14 @@ public class MyHorizontalScrollView extends FrameLayout {
         offsetDescendantRectToMyCoords(child, mTempRect);
 
         int scrollDelta = computeScrollDeltaToGetChildRectOnScreen(mTempRect);
+
+        if (DEBUG_FLING) {
+            Log.w(TAG, "[FLING-DBG][scrollToChild] child=" + child
+                    + " scrollDelta=" + scrollDelta
+                    + " curScrollX=" + getScrollX()
+                    + " range=" + getScrollRange()
+                    + " scrollerFinished=" + mScroller.isFinished());
+        }
 
         if (scrollDelta != 0) {
             scrollBy(scrollDelta, 0);
@@ -1489,6 +1636,13 @@ public class MyHorizontalScrollView extends FrameLayout {
 
     @Override
     public void requestChildFocus(View child, View focused) {
+        if (DEBUG_FLING) {
+            Log.w(TAG, "[FLING-DBG][requestChildFocus] focused=" + focused
+                    + " revealHint=" + (focused != null && focused.getRevealOnFocusHint())
+                    + " isLayoutDirty=" + mIsLayoutDirty
+                    + " scrollerFinished=" + mScroller.isFinished()
+                    + " scrollX=" + getScrollX());
+        }
         if (focused != null && focused.getRevealOnFocusHint()) {
             if (!mIsLayoutDirty) {
                 scrollToChild(focused);
@@ -1567,11 +1721,27 @@ public class MyHorizontalScrollView extends FrameLayout {
 
         final boolean forceLeftGravity = (childWidth > available);
 
+        final boolean scrollerRunningOnEntry = !mScroller.isFinished();
+        if (DEBUG_FLING && scrollerRunningOnEntry) {
+            Log.w(TAG, "[FLING-DBG][onLayout] !!! onLayout DURING FLING !!!"
+                    + " changed=" + changed
+                    + " l=" + l + " r=" + r
+                    + " scrollX=" + getScrollX()
+                    + " range(approx)=" + Math.max(0, childWidth - (r - l - getPaddingLeft() - getPaddingRight()))
+                    + " scrollerCurrX=" + mScroller.getCurrX()
+                    + " scrollerFinalX=" + mScroller.getFinalX(),
+                    new Throwable("onLayout-during-fling-stack"));
+        }
+
         layoutChildren(l, t, r, b, forceLeftGravity);
 
         mIsLayoutDirty = false;
         // Give a child focus if it needs it
         if (mChildToScrollTo != null && isViewDescendantOf(mChildToScrollTo, this)) {
+            if (DEBUG_FLING) {
+                Log.w(TAG, "[FLING-DBG][onLayout] scrollToChild(mChildToScrollTo) child="
+                        + mChildToScrollTo + " scrollerRunning=" + scrollerRunningOnEntry);
+            }
             scrollToChild(mChildToScrollTo);
         }
         mChildToScrollTo = null;
@@ -1597,13 +1767,29 @@ public class MyHorizontalScrollView extends FrameLayout {
             }
         }
 
-        // Calling this with the present values causes it to re-claim them
-        scrollTo(getScrollX(), getScrollY());
+        // ★ 防御性修复：fling 中不要踩 scrollTo 的 clamp 路径，避免把短暂越界的 scrollX 一巴掌钉到 maxScroll。
+        // AOSP 这里无脑 scrollTo 是因为它假设 onLayout 不会在 fling 中触发；
+        // 但我们的容器/子布局可能在 fling 期间 requestLayout（动态内容/measure），所以要规避。
+        if (mScroller.isFinished()) {
+            // Calling this with the present values causes it to re-claim them
+            scrollTo(getScrollX(), getScrollY());
+        } else if (DEBUG_FLING) {
+            Log.w(TAG, "[FLING-DBG][onLayout] SKIP tail scrollTo(curX,curY) because scroller running"
+                    + " scrollX=" + getScrollX()
+                    + " currX=" + mScroller.getCurrX()
+                    + " finalX=" + mScroller.getFinalX());
+        }
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+
+        if (DEBUG_FLING) {
+            Log.w(TAG, "[FLING-DBG][onSizeChanged] w=" + w + " oldw=" + oldw
+                    + " scrollX=" + getScrollX()
+                    + " scrollerFinished=" + mScroller.isFinished());
+        }
 
         View currentFocused = findFocus();
         if (null == currentFocused || this == currentFocused)
@@ -1615,6 +1801,9 @@ public class MyHorizontalScrollView extends FrameLayout {
             currentFocused.getDrawingRect(mTempRect);
             offsetDescendantRectToMyCoords(currentFocused, mTempRect);
             int scrollDelta = computeScrollDeltaToGetChildRectOnScreen(mTempRect);
+            if (DEBUG_FLING) {
+                Log.w(TAG, "[FLING-DBG][onSizeChanged] doScrollX delta=" + scrollDelta);
+            }
             doScrollX(scrollDelta);
         }
     }
@@ -1645,13 +1834,35 @@ public class MyHorizontalScrollView extends FrameLayout {
 
             int maxScroll = Math.max(0, right - width);
 
-            if (getScrollX() == 0 && !mEdgeGlowLeft.isFinished()) {
+            // 每次 fling 开始：重置边界平滑接管状态 & 最近 delta 历史
+            mInEdgeSmoothScroll = false;
+            mLastFlingDelta = 0;
+
+            if (DEBUG_FLING) {
+                mDbgFlingStartVel = Math.abs(velocityX);
+                mDbgLastComputeScrollTs = 0L; // reset 帧间隔计时
+                Log.i(TAG, "[FLING-DBG][fling] >>> START"
+                        + " velocityX=" + velocityX
+                        + " scrollX=" + getScrollX()
+                        + " maxScroll=" + maxScroll
+                        + " width=" + width
+                        + " childRight=" + right);
+            }
+
+            if (false&& getScrollX() == 0 && !mEdgeGlowLeft.isFinished()) {
                 mEdgeGlowLeft.onAbsorb(-velocityX);
-            } else if (getScrollX() == maxScroll && !mEdgeGlowRight.isFinished()) {
+            } else if (false&& getScrollX() == maxScroll && !mEdgeGlowRight.isFinished()) {
                 mEdgeGlowRight.onAbsorb(velocityX);
             } else {
                 mScroller.fling(getScrollX(), getScrollY(), velocityX, 0, 0,
                         maxScroll, 0, 0, width / 2, 0);
+
+                if (DEBUG_FLING) {
+                    Log.i(TAG, "[FLING-DBG][fling] scroller started"
+                            + " finalX=" + mScroller.getFinalX()
+                            + " duration~unknown"
+                            + " scrollerFinished=" + mScroller.isFinished());
+                }
 
                 final boolean movingRight = velocityX > 0;
 
@@ -1664,6 +1875,11 @@ public class MyHorizontalScrollView extends FrameLayout {
                 }
 
                 if (newFocused != currentFocused) {
+                    if (DEBUG_FLING) {
+                        Log.w(TAG, "[FLING-DBG][fling] requestFocus on newFocused="
+                                + newFocused + " (currentFocused=" + currentFocused + ")"
+                                + " -- this can trigger requestChildFocus -> scrollToChild");
+                    }
                     newFocused.requestFocus(movingRight ? View.FOCUS_RIGHT : View.FOCUS_LEFT);
                 }
             }
@@ -1682,8 +1898,31 @@ public class MyHorizontalScrollView extends FrameLayout {
         // we rely on the fact the View.scrollBy calls scrollTo.
         if (getChildCount() > 0) {
             View child = getChildAt(0);
+            final int requestedX = x;
+            final int requestedY = y;
             x = clamp(x, getWidth() - getPaddingRight() - getPaddingLeft(), child.getWidth());
             y = clamp(y, getHeight() - getPaddingBottom() - getPaddingTop(), child.getHeight());
+
+            if (DEBUG_FLING) {
+                final boolean clamped = (x != requestedX) || (y != requestedY);
+                final boolean scrollerRunning = !mScroller.isFinished();
+                if (clamped && scrollerRunning) {
+                    Log.w(TAG, "[FLING-DBG][scrollTo] !!! CLAMP DURING FLING !!! "
+                            + " req=(" + requestedX + "," + requestedY + ")"
+                            + " clamped=(" + x + "," + y + ")"
+                            + " oldScroll=(" + getScrollX() + "," + getScrollY() + ")"
+                            + " range=" + getScrollRange()
+                            + " scrollerCurrX=" + mScroller.getCurrX()
+                            + " scrollerFinalX=" + mScroller.getFinalX(),
+                            new Throwable("scrollTo-clamp-stack"));
+                } else if (clamped) {
+                    Log.d(TAG, "[FLING-DBG][scrollTo] clamp (scroller idle)"
+                            + " req=(" + requestedX + "," + requestedY + ")"
+                            + " clamped=(" + x + "," + y + ")"
+                            + " oldScroll=(" + getScrollX() + "," + getScrollY() + ")");
+                }
+            }
+
             if (x != getScrollX() || y != getScrollY()) {
                 super.scrollTo(x, y);
             }

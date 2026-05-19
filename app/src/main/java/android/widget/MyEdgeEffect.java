@@ -258,11 +258,11 @@ public class MyEdgeEffect {
         // 决定边缘效果类型：GLOW (经典发光) 还是 STRETCH (拉伸)
         // 内部标志 USE_STRETCH_EDGE_EFFECT_BY_DEFAULT 无法直接获取
         // 这里简化为：Android 12+ 默认使用拉伸，否则用发光
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
-            mEdgeEffectType = TYPE_STRETCH;
-        } else {
+//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
+//            mEdgeEffectType = TYPE_STRETCH;
+//        } else {
             mEdgeEffectType = TYPE_GLOW;
-        }
+//        }
 
         mPaint.setAntiAlias(true);
         mPaint.setColor((themeColor & 0xffffff) | 0x33000000);
