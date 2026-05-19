@@ -26,6 +26,7 @@ import android.os.Parcelable;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.FocusFinder;
+import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -63,9 +64,11 @@ import java.util.List;
  * @attr ref android.R.styleable#HorizontalScrollView_fillViewport
  */
 public class MyHorizontalScrollView extends FrameLayout {
-    private static final int ANIMATED_SCROLL_GAP = ScrollView.ANIMATED_SCROLL_GAP;
 
-    private static final float MAX_SCROLL_FACTOR = ScrollView.MAX_SCROLL_FACTOR;
+    static final int ANIMATED_SCROLL_GAP = 250;
+    static final float MAX_SCROLL_FACTOR = 0.5f;
+//    private static final int ANIMATED_SCROLL_GAP = ScrollView.ANIMATED_SCROLL_GAP;
+//    private static final float MAX_SCROLL_FACTOR = ScrollView.MAX_SCROLL_FACTOR;
 
     private static final String TAG = "HorizontalScrollView";
 
@@ -1300,7 +1303,7 @@ public class MyHorizontalScrollView extends FrameLayout {
         ViewGroup.LayoutParams lp = child.getLayoutParams();
 
         final int horizontalPadding = getPaddingLeft() + getPaddingRight();
-        final int childWidthMeasureSpec = MeasureSpec.makeSafeMeasureSpec(
+        final int childWidthMeasureSpec = makeSafeMeasureSpec(
                 Math.max(0, MeasureSpec.getSize(parentWidthMeasureSpec) - horizontalPadding),
                 MeasureSpec.UNSPECIFIED);
 
@@ -1319,7 +1322,7 @@ public class MyHorizontalScrollView extends FrameLayout {
                         + heightUsed, lp.height);
         final int usedTotal = getPaddingLeft() + getPaddingRight() + lp.leftMargin + lp.rightMargin +
                 widthUsed;
-        final int childWidthMeasureSpec = MeasureSpec.makeMeasureSpec(
+        final int childWidthMeasureSpec = makeSafeMeasureSpec(
                 Math.max(0, MeasureSpec.getSize(parentWidthMeasureSpec) - usedTotal),
                 MeasureSpec.UNSPECIFIED);
 
@@ -1555,9 +1558,8 @@ public class MyHorizontalScrollView extends FrameLayout {
             LayoutParams childParams = (LayoutParams) getChildAt(0).getLayoutParams();
             childMargins = childParams.leftMargin + childParams.rightMargin;
         }
-
-        final int available = r - l - getPaddingLeftWithForeground() -
-                getPaddingRightWithForeground() - childMargins;
+        final int available = r - l - getPaddingLeft() -
+                getPaddingRight() - childMargins;
 
         final boolean forceLeftGravity = (childWidth > available);
 
@@ -1573,12 +1575,12 @@ public class MyHorizontalScrollView extends FrameLayout {
         if (!isLaidOut()) {
             final int scrollRange = Math.max(0,
                     childWidth - (r - l - getPaddingLeft() - getPaddingRight()));
-            if (mSavedState != null) {
+            /*if (mSavedState != null) {
                 setScrollX(isLayoutRtl()
                         ? scrollRange - mSavedState.scrollOffsetFromStart
                         : mSavedState.scrollOffsetFromStart);
                 mSavedState = null;
-            } else {
+            } else*/ {
                 if (isLayoutRtl()) {
                     setScrollX(scrollRange - getScrollX());
                 } // getScrollX() default value is "0" for LTR
@@ -1741,5 +1743,89 @@ public class MyHorizontalScrollView extends FrameLayout {
     @Override
     protected Parcelable onSaveInstanceState() {
         return super.onSaveInstanceState();
+    }
+
+    public boolean isLayoutRtl() {
+        return (getLayoutDirection() == LAYOUT_DIRECTION_RTL);
+    }
+
+    public static int makeSafeMeasureSpec(int size, int mode) {
+        boolean sUseZeroUnspecifiedMeasureSpec = Build.VERSION.SDK_INT < 17;
+        if (sUseZeroUnspecifiedMeasureSpec && mode == MeasureSpec.UNSPECIFIED) {
+            return 0;
+        }
+        return MeasureSpec.makeMeasureSpec(size, mode);
+    }
+
+    protected void invalidateParentIfNeeded() {
+        if (isHardwareAccelerated() && getParent() instanceof View) {
+            ((View) getParent()).invalidate();
+        }
+    }
+
+    private static final int DEFAULT_CHILD_GRAVITY = Gravity.TOP | Gravity.START;
+
+    void layoutChildren(int left, int top, int right, int bottom, boolean forceLeftGravity) {
+        final int count = getChildCount();
+
+        final int parentLeft = getPaddingLeft();
+        final int parentRight = right - left - getPaddingRight();
+
+        final int parentTop = getPaddingTop();
+        final int parentBottom = bottom - top - getPaddingBottom();
+
+        for (int i = 0; i < count; i++) {
+            final View child = getChildAt(i);
+            if (child.getVisibility() != GONE) {
+                final LayoutParams lp = (LayoutParams) child.getLayoutParams();
+
+                final int width = child.getMeasuredWidth();
+                final int height = child.getMeasuredHeight();
+
+                int childLeft;
+                int childTop;
+
+                int gravity = lp.gravity;
+                if (gravity == -1) {
+                    gravity = DEFAULT_CHILD_GRAVITY;
+                }
+
+                final int layoutDirection = getLayoutDirection();
+                final int absoluteGravity = Gravity.getAbsoluteGravity(gravity, layoutDirection);
+                final int verticalGravity = gravity & Gravity.VERTICAL_GRAVITY_MASK;
+
+                switch (absoluteGravity & Gravity.HORIZONTAL_GRAVITY_MASK) {
+                    case Gravity.CENTER_HORIZONTAL:
+                        childLeft = parentLeft + (parentRight - parentLeft - width) / 2 +
+                                lp.leftMargin - lp.rightMargin;
+                        break;
+                    case Gravity.RIGHT:
+                        if (!forceLeftGravity) {
+                            childLeft = parentRight - width - lp.rightMargin;
+                            break;
+                        }
+                    case Gravity.LEFT:
+                    default:
+                        childLeft = parentLeft + lp.leftMargin;
+                }
+
+                switch (verticalGravity) {
+                    case Gravity.TOP:
+                        childTop = parentTop + lp.topMargin;
+                        break;
+                    case Gravity.CENTER_VERTICAL:
+                        childTop = parentTop + (parentBottom - parentTop - height) / 2 +
+                                lp.topMargin - lp.bottomMargin;
+                        break;
+                    case Gravity.BOTTOM:
+                        childTop = parentBottom - height - lp.bottomMargin;
+                        break;
+                    default:
+                        childTop = parentTop + lp.topMargin;
+                }
+
+                child.layout(childLeft, childTop, childLeft + width, childTop + height);
+            }
+        }
     }
 }
