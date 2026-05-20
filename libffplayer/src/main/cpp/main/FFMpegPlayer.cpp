@@ -284,9 +284,9 @@ void FFMpegPlayer::stop() {
     mHasAbort = true;
     mIsMute = false;
     mIsSeek = false;
-    mVideoSeekPos = -1;
-    mAudioSeekPos = -1;
-    mSeekTargetS = -1;
+    mVideoSeekPos.store(kSeekPosUnset);
+    mAudioSeekPos.store(kSeekPosUnset);
+    mSeekTargetS.store(kSeekPosUnset);
     {
         std::lock_guard<std::mutex> lk(mEofMutex);
         mVideoStreamEnded = false;
@@ -383,9 +383,9 @@ void FFMpegPlayer::handleSeekIfPending() {
         return;
     }
 
-    double seekTimeS = mSeekTargetS;
+    double seekTimeS = mSeekTargetS.load();
     LOGW("FFMpegPlayer::handleSeekIfPending start, targetS=%f, vPos=%f, aPos=%f",
-         seekTimeS, mVideoSeekPos, mAudioSeekPos)
+         seekTimeS, mVideoSeekPos.load(), mAudioSeekPos.load())
 
     // ============================================================================
     // ① 选 seek 参考流：
@@ -426,14 +426,14 @@ void FFMpegPlayer::handleSeekIfPending() {
     // ③ 等解码线程做完自己的 flush（清掉 mVideoSeekPos / mAudioSeekPos）。
     //    解码线程的 seek() 现在只 flush 自己的 codec，不再碰 mFtx。
     // ============================================================================
-    while (mVideoSeekPos >= 0 || mAudioSeekPos >= 0) {
+    while (mVideoSeekPos.load() >= 0 || mAudioSeekPos.load() >= 0) {
         LOGI("seek wait for decoder flush...mVideoSeekPos: %f, mAudioSeekPos: %f",
-             mVideoSeekPos, mAudioSeekPos)
+             mVideoSeekPos.load(), mAudioSeekPos.load())
         mMutexObj->wait();
     }
 
     mIsSeek = false;
-    mSeekTargetS = -1;
+    mSeekTargetS.store(kSeekPosUnset);
     LOGW("FFMpegPlayer::handleSeekIfPending done")
 }
 
@@ -566,15 +566,15 @@ void FFMpegPlayer::VideoDecodeLoop() {
     });
 
     while (true) {
-        if (mVideoSeekPos >= 0) {
+        if (mVideoSeekPos.load() >= 0) {
             mVideoPacketQueue->clear();
-            mVideoDecoder->seek(mVideoSeekPos);
-            mVideoSeekPos = -1;
+            mVideoDecoder->seek(mVideoSeekPos.load());
+            mVideoSeekPos.store(kSeekPosUnset);
             LOGI("clear video queue via seek")
             mMutexObj->wakeUp();
         }
 
-        while (!mHasAbort && mVideoPacketQueue->isEmpty() && mVideoSeekPos < 0) {
+        while (!mHasAbort && mVideoPacketQueue->isEmpty() && mVideoSeekPos.load() < 0) {
             LOGE("[video] no packet, wait...")
             mVideoPacketQueue->wait();
         }
@@ -643,15 +643,15 @@ void FFMpegPlayer::AudioDecodeLoop() {
     });
 
     while (true) {
-        if (mAudioSeekPos >= 0) {
+        if (mAudioSeekPos.load() >= 0) {
             mAudioPacketQueue->clear();
-            mAudioDecoder->seek(mAudioSeekPos);
-            mAudioSeekPos = -1;
+            mAudioDecoder->seek(mAudioSeekPos.load());
+            mAudioSeekPos.store(kSeekPosUnset);
             LOGI("clear audio queue via seek")
             mMutexObj->wakeUp();
         }
 
-        while (!mHasAbort && mAudioPacketQueue->isEmpty() && mAudioSeekPos < 0) {
+        while (!mHasAbort && mAudioPacketQueue->isEmpty() && mAudioSeekPos.load() < 0) {
              LOGE("[audio] no packet, wait...")
              mAudioPacketQueue->wait();
         }
@@ -855,7 +855,7 @@ bool FFMpegPlayer::seek(double timeS) {
     // ★ 单独保存一份 seek 目标秒数：mVideoSeekPos / mAudioSeekPos 会被 decode 线程清成 -1，
     //   而 demuxer seek 真正落地是在 ReadPacketLoop::handleSeekIfPending —— 它必须能在任何时刻
     //   读到本次 seek 的目标时间，所以这里独立存储。
-    mSeekTargetS = timeS;
+    mSeekTargetS.store(timeS);
     // seek 之后两条流都重新开始消费 packet，先把 EOF 标志清掉，
     // 避免 "complete -> seek -> 再次播放到同一端点" 时误判为已结束。
     {
@@ -865,11 +865,11 @@ bool FFMpegPlayer::seek(double timeS) {
     }
     mPlayCompletedNotified.store(false);
     if (mVideoPacketQueue != nullptr) {
-        mVideoSeekPos = timeS;
+        mVideoSeekPos.store(timeS);
         mVideoPacketQueue->clear();
     }
     if (mAudioPacketQueue != nullptr) {
-        mAudioSeekPos = timeS;
+        mAudioSeekPos.store(timeS);
         mAudioPacketQueue->clear();
     }
     // 统一拨动主时钟到目标位置；这样音/视频解码线程不再各自修复锚点，

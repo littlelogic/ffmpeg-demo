@@ -173,7 +173,9 @@ void FFReader::flush() {
 void FFReader::seek(int64_t timestamp) {
     AVRational time_base = mFtx->streams[mCurStreamIndex]->time_base;
     int64_t seekPos = av_rescale_q((int64_t)(timestamp * AV_TIME_BASE), AV_TIME_BASE_Q, time_base);
-    int ret = avformat_seek_file(mFtx, mCurStreamIndex, INT64_MIN, seekPos, INT64_MAX, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
+    // 仅 BACKWARD：seekPos 是时间戳（已 rescale 到流 time_base），不是帧号。
+    // AVSEEK_FLAG_FRAME 会把 seekPos 当帧索引解释，导致定位错误。
+    int ret = avformat_seek_file(mFtx, mCurStreamIndex, INT64_MIN, seekPos, INT64_MAX, AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
         LOGE("[FFReader], avformat_seek_file failed, ret: %d, timestamp: %" PRId64, ret, timestamp)
     } else {

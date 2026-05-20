@@ -147,11 +147,13 @@ private:
 
     std::shared_ptr<MutexObj> mMutexObj = nullptr;   ///< 线程同步互斥锁
 
-    volatile double mVideoSeekPos = -1;              ///< 视频 Seek 目标位置（-1 表示无 Seek，由 decode 线程清零）
-    volatile double mAudioSeekPos = -1;              ///< 音频 Seek 目标位置（同上）
+    // -1 表示无挂起 seek；std::atomic 避免 32-bit ARM 上对 double 的 torn read/write。
+    static constexpr double kSeekPosUnset = -1.0;
+    std::atomic<double> mVideoSeekPos{kSeekPosUnset}; ///< 视频 Seek 目标位置（秒，decode 线程清零）
+    std::atomic<double> mAudioSeekPos{kSeekPosUnset}; ///< 音频 Seek 目标位置（秒，decode 线程清零）
     // demuxer seek 必须由 ReadPacketLoop 唯一执行（mFtx 共享），但 decode 线程可能先一步
     // 把上面两个 Pos 清掉；所以单独存一份"真正的目标秒数"，让 ReadPacketLoop 任何时候都查得到。
-    volatile double mSeekTargetS = -1;               ///< 本次 seek 的目标时间（秒），由 JNI seek() 写入，handleSeekIfPending 清零
+    std::atomic<double> mSeekTargetS{kSeekPosUnset};  ///< 本次 seek 的目标时间（秒），JNI seek() 写入，handleSeekIfPending 清零
 
     std::thread *mReadPacketThread = nullptr;        ///< 读包线程
 
