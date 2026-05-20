@@ -286,6 +286,7 @@ void FFMpegPlayer::stop() {
     mIsSeek = false;
     mVideoSeekPos = -1;
     mAudioSeekPos = -1;
+    mSeekTargetS = -1;
     {
         std::lock_guard<std::mutex> lk(mEofMutex);
         mVideoStreamEnded = false;
@@ -350,25 +351,16 @@ void FFMpegPlayer::ReadPacketLoop() {
             // double check stop state
             // or check pause state for pause & seek
 
-            // check mIsSeek: play complete -> seek -> play
-            if (mIsSeek && mVideoSeekPos < 0 && mAudioSeekPos < 0) {
-                mIsSeek = false;
-                LOGW("FFMpegPlayer::ReadPacketLoop, reset seek status")
-            }
+            // ★ PAUSE 状态下也可能有 seek 请求：JNI seek() 会 wakeUp 把我们叫醒，
+            //   这里要在再次进入 PAUSE wait 之前把 demuxer seek 处理掉，
+            //   否则恢复播放后 av_read_frame 会从旧位置继续读。
+            handleSeekIfPending();
             continue;
         }
 
-        // check is seek
-        bool isSeeking = false;
-        while (mVideoSeekPos >= 0 || mAudioSeekPos >= 0) {
-            isSeeking = true;
-            LOGI("seek wait...mVideoSeekPos: %f, mAudioSeekPos: %f", mVideoSeekPos, mAudioSeekPos)
-            mMutexObj->wait();
-        }
-        if (isSeeking) {
-            mIsSeek = false;
-            LOGW("FFMpegPlayer::ReadPacketLoop, seek prepare has ready")
-        }
+        // PLAYING 路径：本轮 av_read_frame 之前，如果有挂着的 seek，先在本线程把 demuxer seek 做掉，
+        // 然后等解码线程清空它们各自的 codec 缓冲。详见 handleSeekIfPending 注释。
+        handleSeekIfPending();
 
         // read packet to queue
         updatePlayerState(PlayerState::PLAYING);
@@ -381,6 +373,68 @@ void FFMpegPlayer::ReadPacketLoop() {
         }
     }
     LOGI("FFMpegPlayer::ReadPacketLoop end")
+}
+
+void FFMpegPlayer::handleSeekIfPending() {
+    // 没有挂起的 seek 直接返回。
+    // 即便 decode 线程已经把 mVideoSeekPos / mAudioSeekPos 清成 -1，只要 mIsSeek 还是 true
+    // 就说明 demuxer seek 还没真正落地（demuxer seek 只能由本线程做）。
+    if (!mIsSeek) {
+        return;
+    }
+
+    double seekTimeS = mSeekTargetS;
+    LOGW("FFMpegPlayer::handleSeekIfPending start, targetS=%f, vPos=%f, aPos=%f",
+         seekTimeS, mVideoSeekPos, mAudioSeekPos)
+
+    // ============================================================================
+    // ① 选 seek 参考流：
+    //    - 有 video 用 video（关键帧粒度大，必须落到 video keyframe，否则花屏/黑屏）；
+    //    - 纯音频回退用 audio。
+    // ============================================================================
+    int refStreamIdx = -1;
+    AVRational refTb = AV_TIME_BASE_Q;
+    if (mVideoDecoder != nullptr) {
+        refStreamIdx = mVideoDecoder->getStreamIndex();
+        refTb = mVideoDecoder->getTimeBase();
+    } else if (mAudioDecoder != nullptr) {
+        refStreamIdx = mAudioDecoder->getStreamIndex();
+        refTb = mAudioDecoder->getTimeBase();
+    }
+
+    // ============================================================================
+    // ② 在本线程（mFtx 唯一持有者）上做一次 avformat_seek_file。
+    //    只用 AVSEEK_FLAG_BACKWARD：到目标 ts 之前最近的关键帧；精确丢帧到目标 pts
+    //    交给 VideoDecoder 解码循环里 frame->pts >= mSeekPos 那段去做。
+    //    （旧版的 AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME 是错的：FRAME 表示
+    //     ts 参数按帧号解释，但我们传的是时间戳。）
+    // ============================================================================
+    if (seekTimeS >= 0 && refStreamIdx >= 0 && mFtx != nullptr) {
+        int64_t seekTs = av_rescale_q((int64_t)(seekTimeS * AV_TIME_BASE),
+                                      AV_TIME_BASE_Q, refTb);
+        int sret = avformat_seek_file(mFtx, refStreamIdx,
+                                      INT64_MIN, seekTs, INT64_MAX,
+                                      AVSEEK_FLAG_BACKWARD);
+        LOGI("[seek] demuxer seek done: timeS=%f refStream=%d ts=%" PRId64 " ret=%d",
+             seekTimeS, refStreamIdx, seekTs, sret)
+    } else {
+        LOGE("[seek] skip avformat_seek_file: targetS=%f refIdx=%d mFtx=%p",
+             seekTimeS, refStreamIdx, mFtx)
+    }
+
+    // ============================================================================
+    // ③ 等解码线程做完自己的 flush（清掉 mVideoSeekPos / mAudioSeekPos）。
+    //    解码线程的 seek() 现在只 flush 自己的 codec，不再碰 mFtx。
+    // ============================================================================
+    while (mVideoSeekPos >= 0 || mAudioSeekPos >= 0) {
+        LOGI("seek wait for decoder flush...mVideoSeekPos: %f, mAudioSeekPos: %f",
+             mVideoSeekPos, mAudioSeekPos)
+        mMutexObj->wait();
+    }
+
+    mIsSeek = false;
+    mSeekTargetS = -1;
+    LOGW("FFMpegPlayer::handleSeekIfPending done")
 }
 
 /**
@@ -798,6 +852,10 @@ double FFMpegPlayer::getDuration() {
 bool FFMpegPlayer::seek(double timeS) {
     LOGI("seek to: %f, player state: %d", timeS, mPlayerState)
     mIsSeek = true;
+    // ★ 单独保存一份 seek 目标秒数：mVideoSeekPos / mAudioSeekPos 会被 decode 线程清成 -1，
+    //   而 demuxer seek 真正落地是在 ReadPacketLoop::handleSeekIfPending —— 它必须能在任何时刻
+    //   读到本次 seek 的目标时间，所以这里独立存储。
+    mSeekTargetS = timeS;
     // seek 之后两条流都重新开始消费 packet，先把 EOF 标志清掉，
     // 避免 "complete -> seek -> 再次播放到同一端点" 时误判为已结束。
     {
@@ -824,6 +882,12 @@ bool FFMpegPlayer::seek(double timeS) {
             mMediaClock->setSyncType(MediaClock::SyncType::VIDEO_MASTER);
         }
         mMediaClock->seekTo((int64_t)(timeS * 1000));
+    }
+    // ★ 必须唤醒 ReadPacketLoop —— 在 PAUSE 状态下它正卡在 mMutexObj->wait()，
+    //   不主动唤醒就没人去做 demuxer 的 avformat_seek_file，
+    //   恢复播放后会从旧位置继续读包（播放偏移、首帧不是关键帧等问题）。
+    if (mMutexObj) {
+        mMutexObj->wakeUp();
     }
     return true;
 }

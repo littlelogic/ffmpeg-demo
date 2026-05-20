@@ -257,15 +257,15 @@ double AudioDecoder::getDuration() {
 }
 
 int AudioDecoder::seek(double pos) {
+    // ★ demuxer 的 avformat_seek_file 已由 ReadPacketLoop 统一执行（见 VideoDecoder::seek 注释）。
+    //   这里只做"解码器本地"的事：
+    //     1. avcodec_flush_buffers 清空 codec 缓冲；
+    //     2. mFixStartTime / mNeedFlushRender 用于本地锚点回退 & 通知 AudioTrack flush。
     flush();
-    int64_t seekPos = av_rescale_q((int64_t)(pos * AV_TIME_BASE), AV_TIME_BASE_Q, mTimeBase);
-    int ret = avformat_seek_file(mFtx, getStreamIndex(),
-                             INT64_MIN, seekPos, INT64_MAX, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
-    LOGE("[audio] seek to: %f, seekPos: %" PRId64 ", ret: %d", pos, seekPos, ret)
-    // seek后需要恢复起始时间
+    LOGE("[audio] decoder-side seek prep: pos=%f", pos)
     mFixStartTime = true;
     mNeedFlushRender = true;
-    return ret;
+    return 0;
 }
 
 void AudioDecoder::release() {

@@ -592,26 +592,25 @@ bool VideoDecoder::avSync(AVFrame *frame) {
  * @return 成功返回 0，失败返回错误代码
  */
 int VideoDecoder::seek(double pos) {
-    // 清空解码缓冲
+    // ★ demuxer 的 avformat_seek_file 已由 ReadPacketLoop 统一执行（mFtx 只有一个全局读指针，
+    //   音视频解码线程不可各自 seek，否则会互相覆盖位置且对 AVFormatContext 形成数据竞争）。
+    //   这里只做"解码器本地"的两件事：
+    //     1. 清空 codec 内部缓冲：avcodec_flush_buffers，让后续 packet 干净解码；
+    //     2. 设置 mSeekPos / mFixStartTime / mSeekStartTimeMs：用于精确 seek 时丢帧到目标位置，
+    //        以及 MediaClock 缺席时本地同步锚点的回退恢复。
     flush();
 
-    // 将位置转换为流的时间基数单位
+    // 即便不再调用 avformat_seek_file，仍需要把 pos 换算到本流的 time_base，
+    // 因为 decode 循环里要拿 mSeekPos 与 frame->pts 比较来判断"已追到目标"。
     int64_t seekPos = av_rescale_q((int64_t)(pos * AV_TIME_BASE), AV_TIME_BASE_Q, mTimeBase);
 
-    // 执行 Seek 操作
-    // AVSEEK_FLAG_BACKWARD：优先查找关键帧（速度快但可能不精确）
-    // AVSEEK_FLAG_FRAME：逐帧定位（精确但速度慢）
-    int ret = avformat_seek_file(mFtx, getStreamIndex(),
-                                 INT64_MIN, seekPos, INT64_MAX, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
+    LOGE("[video] decoder-side seek prep: pos=%f, seekPos(in video tb)=%" PRId64, pos, seekPos)
 
-    LOGE("[video] seek to: %f, seekPos: %" PRId64 ", ret: %d", pos, seekPos, ret)
-
-    // Seek 后需要恢复起始时间以保证音视频同步
     mFixStartTime = true;
     mSeekPos = seekPos;
     mSeekStartTimeMs = getCurrentTimeMs();
 
-    return ret;
+    return 0;
 }
 
 /**

@@ -147,8 +147,11 @@ private:
 
     std::shared_ptr<MutexObj> mMutexObj = nullptr;   ///< 线程同步互斥锁
 
-    volatile double mVideoSeekPos = -1;              ///< 视频 Seek 目标位置（-1 表示无 Seek）
-    volatile double mAudioSeekPos = -1;              ///< 音频 Seek 目标位置
+    volatile double mVideoSeekPos = -1;              ///< 视频 Seek 目标位置（-1 表示无 Seek，由 decode 线程清零）
+    volatile double mAudioSeekPos = -1;              ///< 音频 Seek 目标位置（同上）
+    // demuxer seek 必须由 ReadPacketLoop 唯一执行（mFtx 共享），但 decode 线程可能先一步
+    // 把上面两个 Pos 清掉；所以单独存一份"真正的目标秒数"，让 ReadPacketLoop 任何时候都查得到。
+    volatile double mSeekTargetS = -1;               ///< 本次 seek 的目标时间（秒），由 JNI seek() 写入，handleSeekIfPending 清零
 
     std::thread *mReadPacketThread = nullptr;        ///< 读包线程
 
@@ -186,6 +189,17 @@ private:
     void ReadPacketLoop();      ///< 读包线程主循环
     void VideoDecodeLoop();     ///< 视频解码线程主循环
     void AudioDecodeLoop();     ///< 音频解码线程主循环
+
+    /**
+     * @brief 处理挂着的 seek 请求（demuxer 部分）
+     * @details 必须且只能由 ReadPacketLoop 线程调用——mFtx 只允许单一读者执行 avformat_seek_file。
+     *   逻辑：
+     *     1. 看 mIsSeek，没挂 seek 直接返回；
+     *     2. 用 mSeekTargetS 配合 video（优先）/ audio 参考流做一次 avformat_seek_file；
+     *     3. 等 VideoDecoder / AudioDecoder 清空自己的 codec 缓冲（清掉 mVideoSeekPos / mAudioSeekPos）；
+     *     4. 清掉 mIsSeek 和 mSeekTargetS。
+     */
+    void handleSeekIfPending();
 
     void updatePlayerState(PlayerState state);  ///< 更新播放器状态
     void onPlayCompleted(JNIEnv *env);          ///< 播放完成处理（已带去重）
