@@ -19,6 +19,7 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <vector>
 #include <memory.h>
 #include "header/Logger.h"
 #include "../utils/MutexObj.h"
@@ -151,9 +152,10 @@ private:
     static constexpr double kSeekPosUnset = -1.0;
     std::atomic<double> mVideoSeekPos{kSeekPosUnset}; ///< 视频 Seek 目标位置（秒，decode 线程清零）
     std::atomic<double> mAudioSeekPos{kSeekPosUnset}; ///< 音频 Seek 目标位置（秒，decode 线程清零）
-    // demuxer seek 必须由 ReadPacketLoop 唯一执行（mFtx 共享），但 decode 线程可能先一步
-    // 把上面两个 Pos 清掉；所以单独存一份"真正的目标秒数"，让 ReadPacketLoop 任何时候都查得到。
-    std::atomic<double> mSeekTargetS{kSeekPosUnset};  ///< 本次 seek 的目标时间（秒），JNI seek() 写入，handleSeekIfPending 清零
+
+    // UI 只往此列表追加 seek 时间；ReadPacketLoop 取最新并清空后执行 demuxer seek（合并连击 seek）。
+    std::mutex mWillSeekMutex;
+    std::vector<double> mWillSeekPointsList;
 
     std::thread *mReadPacketThread = nullptr;        ///< 读包线程
 
@@ -193,15 +195,23 @@ private:
     void AudioDecodeLoop();     ///< 音频解码线程主循环
 
     /**
-     * @brief 处理挂着的 seek 请求（demuxer 部分）
-     * @details 必须且只能由 ReadPacketLoop 线程调用——mFtx 只允许单一读者执行 avformat_seek_file。
-     *   逻辑：
-     *     1. 看 mIsSeek，没挂 seek 直接返回；
-     *     2. 用 mSeekTargetS 配合 video（优先）/ audio 参考流做一次 avformat_seek_file；
-     *     3. 等 VideoDecoder / AudioDecoder 清空自己的 codec 缓冲（清掉 mVideoSeekPos / mAudioSeekPos）；
-     *     4. 清掉 mIsSeek 和 mSeekTargetS。
+     * @brief 从 willSeekPointsList 取出最新目标并清空列表（加锁）
+     * @return 最新 seek 秒数；列表为空返回 kSeekPosUnset
      */
-    void handleSeekIfPending();
+    double takeLatestSeekPoint();
+
+    /**
+     * @brief 消费 seek 队列（仅 ReadPacketLoop 调用，每轮最多处理一次）
+     * @details 取最新 → applySeekInternal 一次 → return，使本轮仍能 readAvPacketToQueue。
+     *          列表若仍有待处理（高频拖动），mIsSeek 保持 true，下轮再 drain。
+     */
+    void drainWillSeekPointsList();
+
+    /**
+     * @brief 执行单次 seek（清队列、主时钟、avformat_seek_file、等解码 flush）
+     * @details 仅 ReadPacketLoop 调用
+     */
+    void applySeekInternal(double timeS);
 
     void updatePlayerState(PlayerState state);  ///< 更新播放器状态
     void onPlayCompleted(JNIEnv *env);          ///< 播放完成处理（已带去重）
