@@ -46,6 +46,8 @@ public:
 
     bool mNeedFlushRender = false;        ///< Seek 后需要通知渲染器刷新
 
+    int64_t mSeekPos = INT64_MAX;         ///< 精确 seek 目标（流 time_base），INT64_MAX 表示未在精确 seek
+
     int mDataSize = 0;                    ///< 重采样后的数据大小（字节）
 
     uint8_t *mAudioBuffer = nullptr;      ///< 重采样输出缓冲

@@ -135,6 +135,22 @@ int AudioDecoder::decode(AVPacket *avPacket) {
         auto ptsMs = mAvFrame->pts * av_q2d(mFtx->streams[getStreamIndex()]->time_base) * 1000;
         LOGI("[audio] avcodec_receive_frame...pts: %" PRId64 ", time: %f, need retry: %d", mAvFrame->pts, ptsMs, mNeedResent)
 
+        if (mSeekPos != INT64_MAX) {
+            int64_t ptsTb = framePtsInStreamTb(mAvFrame);
+            if (ptsTb != AV_NOPTS_VALUE && ptsTb < mSeekPos) {
+                LOGD("[audio] precision seek skip frame, ptsTb=%" PRId64 " < target=%" PRId64,
+                     ptsTb, mSeekPos)
+                av_frame_unref(mAvFrame);
+                receiveCount++;
+                continue;
+            }
+            if (ptsTb != AV_NOPTS_VALUE && ptsTb >= mSeekPos) {
+                LOGE("[audio] precision seek reached, ptsTb=%" PRId64 " target=%" PRId64,
+                     ptsTb, mSeekPos)
+                mSeekPos = INT64_MAX;
+            }
+        }
+
         int nb = resample(mAvFrame);
 
         updateTimestamp(mAvFrame);
@@ -190,18 +206,9 @@ void AudioDecoder::updateTimestamp(AVFrame *frame) {
         mStartTimeMsForSync = getCurrentTimeMs();
     }
 
-    // 优先使用 best_effort_timestamp，兼容个别容器没有 frame->pts 的情况
-    int64_t pts = AV_NOPTS_VALUE;
-    if (frame->best_effort_timestamp != AV_NOPTS_VALUE) {
-        pts = frame->best_effort_timestamp;
-    } else if (frame->pts != AV_NOPTS_VALUE) {
-        pts = frame->pts;
-    } else if (frame->pkt_dts != AV_NOPTS_VALUE) {
-        pts = frame->pkt_dts;
-    }
-
-    if (pts != AV_NOPTS_VALUE) {
-        mCurTimeStampMs = (int64_t)(pts * av_q2d(mTimeBase) * 1000);
+    int64_t ptsMs = framePtsMs(frame);
+    if (ptsMs != AV_NOPTS_VALUE) {
+        mCurTimeStampMs = ptsMs;
     } else if (frame->pkt_duration > 0) {
         int64_t deltaMs = (int64_t)(frame->pkt_duration * av_q2d(mTimeBase) * 1000);
         mCurTimeStampMs += deltaMs;
@@ -258,18 +265,18 @@ double AudioDecoder::getDuration() {
 
 int AudioDecoder::seek(double pos) {
     // ★ demuxer 的 avformat_seek_file 已由 ReadPacketLoop 统一执行（见 VideoDecoder::seek 注释）。
-    //   这里只做"解码器本地"的事：
-    //     1. avcodec_flush_buffers 清空 codec 缓冲；
-    //     2. mFixStartTime / mNeedFlushRender 用于本地锚点回退 & 通知 AudioTrack flush。
     flush();
-    LOGE("[audio] decoder-side seek prep: pos=%f", pos)
+    int64_t seekPos = av_rescale_q((int64_t)(pos * AV_TIME_BASE), AV_TIME_BASE_Q, mTimeBase);
+    LOGE("[audio] decoder-side seek prep: pos=%f, seekPos(tb)=%" PRId64, pos, seekPos)
     mFixStartTime = true;
     mNeedFlushRender = true;
+    mSeekPos = seekPos;
     return 0;
 }
 
 void AudioDecoder::release() {
     mFixStartTime = false;
+    mSeekPos = INT64_MAX;
     mNeedFlushRender = false;
     if (mAudioBuffer != nullptr) {
         av_free(mAudioBuffer);

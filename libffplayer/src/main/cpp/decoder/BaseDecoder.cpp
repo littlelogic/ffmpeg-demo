@@ -11,6 +11,30 @@
 #include "BaseDecoder.h"
 #include "header/Logger.h"
 
+int64_t BaseDecoder::framePtsInStreamTb(const AVFrame *frame) {
+    if (frame == nullptr) {
+        return AV_NOPTS_VALUE;
+    }
+    if (frame->best_effort_timestamp != AV_NOPTS_VALUE) {
+        return frame->best_effort_timestamp;
+    }
+    if (frame->pts != AV_NOPTS_VALUE) {
+        return frame->pts;
+    }
+    if (frame->pkt_dts != AV_NOPTS_VALUE) {
+        return frame->pkt_dts;
+    }
+    return AV_NOPTS_VALUE;
+}
+
+int64_t BaseDecoder::framePtsMs(const AVFrame *frame) const {
+    int64_t ptsTb = framePtsInStreamTb(frame);
+    if (ptsTb == AV_NOPTS_VALUE) {
+        return AV_NOPTS_VALUE;
+    }
+    return (int64_t)(ptsTb * av_q2d(mTimeBase) * 1000);
+}
+
 /**
  * @brief 构造函数
  * @details 从流中提取时间基（time_base）和时长（duration）

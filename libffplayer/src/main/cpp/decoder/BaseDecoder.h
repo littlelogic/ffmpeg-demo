@@ -85,6 +85,12 @@ protected:
     std::shared_ptr<MediaClock> mMediaClock = nullptr; ///< 主时钟（由 FFMpegPlayer 注入）
     int64_t mStreamStartPtsMs = 0;         ///< 当前流的起始 PTS（用于跨流归一化）
 
+    /** 流 time_base 下的 PTS（best_effort / pts / dts），用于精确 seek 比较 */
+    static int64_t framePtsInStreamTb(const AVFrame *frame);
+
+    /** 将帧 PTS 转为毫秒（无有效 PTS 返回 AV_NOPTS_VALUE） */
+    int64_t framePtsMs(const AVFrame *frame) const;
+
 private:
     int mStreamIndex = -1;                 ///< 流索引
 };

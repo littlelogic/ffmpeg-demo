@@ -330,16 +330,32 @@ int VideoDecoder::decode(AVPacket *avPacket) {
         // ====== 第五步：处理有效的解码帧 ======
         int64_t receivePoint = getCurrentTimeMs() - start;
 
+        // 精确 seek：demuxer BACKWARD 落在关键帧(<=目标)，此处丢弃 pts < 目标的帧，首帧渲染 >= 目标。
+        // 须在 updateTimestamp / 回调前处理，避免过早修复同步锚点或把旧帧交给 avSync。
+        if (mSeekPos != INT64_MAX) {
+            int64_t ptsTb = framePtsInStreamTb(mAvFrame);
+            if (ptsTb != AV_NOPTS_VALUE && ptsTb < mSeekPos) {
+                if (mAvFrame->format == AV_PIX_FMT_MEDIACODEC) {
+                    av_mediacodec_release_buffer((AVMediaCodecBuffer *) mAvFrame->data[3], 0);
+                }
+                LOGD("[video] precision seek skip frame, ptsTb=%" PRId64 " < target=%" PRId64,
+                     ptsTb, mSeekPos)
+                av_frame_unref(mAvFrame);
+                receiveCount++;
+                continue;
+            }
+            if (ptsTb != AV_NOPTS_VALUE && ptsTb >= mSeekPos) {
+                mSeekEndTimeMs = getCurrentTimeMs();
+                int64_t precisionSeekConsume = mSeekEndTimeMs - mSeekStartTimeMs;
+                LOGE("[video] precision seek reached, ptsTb=%" PRId64 " target=%" PRId64
+                     " consume=%" PRId64 " ms",
+                     ptsTb, mSeekPos, precisionSeekConsume)
+                mSeekPos = INT64_MAX;
+            }
+        }
+
         // 更新时间戳（用于音视频同步）
         updateTimestamp(mAvFrame);
-
-        // 检查 Seek 是否完成（当帧的 PTS 大于等于 Seek 目标位置）
-        if (mAvFrame->pts >= mSeekPos) {
-            mSeekPos = INT64_MAX;
-            mSeekEndTimeMs = getCurrentTimeMs();
-            int64_t precisionSeekConsume = mSeekEndTimeMs - mSeekStartTimeMs;
-            LOGE("[video] avcodec_receive_frame...pts: %" PRId64 ", precision seek consume: %" PRId64, mAvFrame->pts, precisionSeekConsume)
-        }
 
         // ====== 第六步：处理像素格式 ======
         // 检查宽高是否为偶数（某些图像处理需要偶数尺寸）
@@ -462,30 +478,17 @@ void VideoDecoder::updateTimestamp(AVFrame *frame) {
         mStartTimeMsForSync = getCurrentTimeMs();
     }
 
-    // 优先使用 best_effort_timestamp（FFmpeg 综合 pts/dts/解码顺序给出的最优 PTS）；
-    // 这样既能正确处理 B 帧/PTS 缺失，也能避免使用已 deprecated 的 coded_picture_number。
-    int64_t pts = AV_NOPTS_VALUE;
-    if (frame->best_effort_timestamp != AV_NOPTS_VALUE) {
-        pts = frame->best_effort_timestamp;
-    } else if (frame->pts != AV_NOPTS_VALUE) {
-        pts = frame->pts;
-    } else if (frame->pkt_dts != AV_NOPTS_VALUE) {
-        pts = frame->pkt_dts;
-    }
-
-    if (pts != AV_NOPTS_VALUE) {
-        mCurTimeStampMs = (int64_t)(pts * av_q2d(mTimeBase) * 1000);
+    int64_t ptsMs = framePtsMs(frame);
+    if (ptsMs != AV_NOPTS_VALUE) {
+        mCurTimeStampMs = ptsMs;
     } else if (frame->pkt_duration > 0) {
         // VFR / 容器异常时，按 packet 持续时间累加。
         int64_t deltaMs = (int64_t)(frame->pkt_duration * av_q2d(mTimeBase) * 1000);
         mCurTimeStampMs += deltaMs;
     }
 
-    LOGD("[video] updateTimestamp: pts=%ld, dts=%ld, best=%ld -> %" PRId64 " ms",
-         (frame->pts != AV_NOPTS_VALUE ? frame->pts : -1),
-         (frame->pkt_dts != AV_NOPTS_VALUE ? frame->pkt_dts : -1),
-         (long)(frame->best_effort_timestamp != AV_NOPTS_VALUE ? frame->best_effort_timestamp : -1),
-         mCurTimeStampMs);
+    LOGD("[video] updateTimestamp: ptsMs=%" PRId64 " -> mCur=%" PRId64 " ms",
+         (ptsMs != AV_NOPTS_VALUE ? ptsMs : (int64_t)-1), mCurTimeStampMs);
 
     // 兼容兜底路径：无 MediaClock 时，本地系统锚点的 fix-start-time 仍生效（Seek 后用）。
     if (mFixStartTime) {
@@ -630,6 +633,7 @@ int VideoDecoder::seek(double pos) {
 void VideoDecoder::release() {
     mFixStartTime = false;
     mStartTimeMsForSync = -1;
+    mSeekPos = INT64_MAX;
 
     // 释放视频帧
     if (mAvFrame != nullptr) {
