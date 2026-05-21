@@ -44,6 +44,8 @@ public:
 
     int64_t getStartTimeMsForSync() const;    ///< 获取,音视频同步起始时间（ms）
     int64_t getTimestamp() const;             ///< 获取当前帧时间戳（ms）
+    void onPrecisionSeekFrameDisplayed();     ///< 精确 seek 目标帧已上屏，清除门槛
+    void cancelPrecisionSeekPending();        ///< 放弃精确门槛（预取失败时恢复出画）
     int getRotate();                         ///< 获取视频旋转角度
     AVRational getDisplayAspectRatio();      ///< 获取显示宽高比（DAR）
 
@@ -59,6 +61,9 @@ private:
     int64_t mSeekPos = INT64_MAX;            ///< Seek 目标位置（时间基单位）
     int64_t mSeekStartTimeMs = -1;           ///< Seek 开始时间（用于计算 Seek 耗时）
     int64_t mSeekEndTimeMs = -1;             ///< Seek 结束时间
+    bool mPrecisionSeekOutputPending = false;  ///< 精确 seek 期间：仅允许输出第一帧 >= 目标的画面
+    bool mDropExtraFramesThisDecode = false;   ///< 本 packet 已输出精确 seek 目标帧，丢弃同包剩余帧
+    static constexpr int64_t kPrecisionSeekMaxHuntMs = 2000; ///< 追帧超时：防止永远丢帧导致画面卡死
 
     jobject mSurface = nullptr;              ///< Android Surface 对象（硬件解码渲染目标）
 
@@ -68,6 +73,9 @@ private:
     SwsContext *mSwsContext = nullptr;        ///< 图像格式转换上下文（libswscale）
 
     void updateTimestamp(AVFrame *frame);     ///< 更新帧时间戳
+    bool isBeforePrecisionSeekTarget(int64_t normPtsMs) const;
+    void releaseMediacodecFrameIfNeeded(AVFrame *frame);
+    void dispatchFrameToListener(AVFrame *frame);
     int swsScale(AVFrame *srcFrame, AVFrame *swFrame); ///< 像素格式转换
 
     double getFps();

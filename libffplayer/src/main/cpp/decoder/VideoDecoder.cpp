@@ -273,6 +273,7 @@ bool VideoDecoder::prepare() {
  * @return 成功返回 0，失败或 EOF 返回错误代码
  */
 int VideoDecoder::decode(AVPacket *avPacket) {
+    mDropExtraFramesThisDecode = false;
     int64_t start = getCurrentTimeMs();
 
     // ====== 第一步：判断是否为 EOF 标记 ======
@@ -330,68 +331,48 @@ int VideoDecoder::decode(AVPacket *avPacket) {
         // ====== 第五步：处理有效的解码帧 ======
         int64_t receivePoint = getCurrentTimeMs() - start;
 
-        // 精确 seek：demuxer BACKWARD 落在关键帧(<=目标)，此处丢弃 pts < 目标的帧，首帧渲染 >= 目标。
-        // 须在 updateTimestamp / 回调前处理，避免过早修复同步锚点或把旧帧交给 avSync。
-        if (mSeekPos != INT64_MAX) {
-            int64_t ptsTb = framePtsInStreamTb(mAvFrame);
-            if (ptsTb != AV_NOPTS_VALUE && ptsTb < mSeekPos) {
-                if (mAvFrame->format == AV_PIX_FMT_MEDIACODEC) {
-                    av_mediacodec_release_buffer((AVMediaCodecBuffer *) mAvFrame->data[3], 0);
-                }
-                LOGD("[video] precision seek skip frame, ptsTb=%" PRId64 " < target=%" PRId64,
-                     ptsTb, mSeekPos)
+        int64_t ptsMs = framePtsMs(mAvFrame);
+        int64_t normPtsMs = (ptsMs != AV_NOPTS_VALUE) ? (ptsMs - mStreamStartPtsMs) : AV_NOPTS_VALUE;
+
+        if (mDropExtraFramesThisDecode) {
+            releaseMediacodecFrameIfNeeded(mAvFrame);
+            av_frame_unref(mAvFrame);
+            receiveCount++;
+            continue;
+        }
+
+        // 精确 seek（播放/暂停）：丢弃所有 < 目标的中间帧，只输出第一帧 >= 目标
+        if (mPrecisionSeekOutputPending) {
+            bool beforeTarget = isBeforePrecisionSeekTarget(normPtsMs);
+            int64_t huntMs = getCurrentTimeMs() - mSeekStartTimeMs;
+            if (beforeTarget && mSeekStartTimeMs >= 0 && huntMs < kPrecisionSeekMaxHuntMs) {
+                releaseMediacodecFrameIfNeeded(mAvFrame);
+                LOGD("[video] precision seek skip intermediate, normPts=%" PRId64 " target=%" PRId64,
+                     normPtsMs, mPrecisionSeekTargetNormMs)
                 av_frame_unref(mAvFrame);
                 receiveCount++;
                 continue;
             }
-            if (ptsTb != AV_NOPTS_VALUE && ptsTb >= mSeekPos) {
-                mSeekEndTimeMs = getCurrentTimeMs();
-                int64_t precisionSeekConsume = mSeekEndTimeMs - mSeekStartTimeMs;
-                LOGE("[video] precision seek reached, ptsTb=%" PRId64 " target=%" PRId64
-                     " consume=%" PRId64 " ms",
-                     ptsTb, mSeekPos, precisionSeekConsume)
-                mSeekPos = INT64_MAX;
+            if (beforeTarget) {
+                LOGW("[video] precision seek hunt timeout %" PRId64 " ms, force output normPts=%" PRId64
+                     " target=%" PRId64, huntMs, normPtsMs, mPrecisionSeekTargetNormMs)
             }
+            mPrecisionSeekOutputPending = false;
+            mDropExtraFramesThisDecode = true;
+            mSeekEndTimeMs = getCurrentTimeMs();
+            LOGE("[video] precision seek output frame, normPts=%" PRId64 " consume=%" PRId64 " ms",
+                 normPtsMs, mSeekEndTimeMs - mSeekStartTimeMs)
+            updateTimestamp(mAvFrame);
+            dispatchFrameToListener(mAvFrame);
+            av_frame_unref(mAvFrame);
+            receiveCount++;
+            LOGW("[video] decode sendPoint: %" PRId64 ", receivePoint: %" PRId64 ", receiveCount: %d",
+                 sendPoint, receivePoint, receiveCount)
+            continue;
         }
 
-        // 更新时间戳（用于音视频同步）
         updateTimestamp(mAvFrame);
-
-        // ====== 第六步：处理像素格式 ======
-        // 检查宽高是否为偶数（某些图像处理需要偶数尺寸）
-        bool isEvenEdge = isEven(mAvFrame->width) && isEven(mAvFrame->height);
-
-        // 如果是硬件格式、RGB24 或满足条件的 YUV 格式，直接输出
-        if (mAvFrame->format == hw_pix_fmt || mAvFrame->format == AV_PIX_FMT_RGB24 || (isEvenEdge && (mAvFrame->format == AV_PIX_FMT_YUV420P || mAvFrame->format == AV_PIX_FMT_NV12))) {
-            if (mOnFrameArrivedListener) {
-                mOnFrameArrivedListener(mAvFrame);  // 回调渲染器
-            }
-        }
-        // 其他格式需要转换为 RGBA 后才能渲染（如 YUV420P10LE 等）
-        else if (mAvFrame->format != AV_PIX_FMT_NONE) {
-            AVFrame *swFrame = av_frame_alloc();  // 分配输出帧缓冲
-            // 计算 RGBA 格式所需的缓冲大小
-            int size = av_image_get_buffer_size(AV_PIX_FMT_RGBA, mAvFrame->width, mAvFrame->height, 1);
-            auto *buffer = static_cast<uint8_t *>(av_malloc(size * sizeof(uint8_t)));
-            // 关联缓冲到帧结构
-            av_image_fill_arrays(swFrame->data, swFrame->linesize, buffer, AV_PIX_FMT_RGBA, mAvFrame->width, mAvFrame->height, 1);
-
-            // 执行格式转换（使用双线性插值）
-            if (swsScale(mAvFrame, swFrame) > 0) {
-                if (mOnFrameArrivedListener) {
-                    mOnFrameArrivedListener(swFrame);  // 回调渲染器
-                }
-            }
-
-            // 释放临时帧和缓冲
-            av_frame_free(&swFrame);
-            av_freep(&swFrame);
-            av_free(buffer);
-        } else {
-            LOGE("[video] frame format is AV_PIX_FMT_NONE")
-        }
-
-        // 释放当前帧数据（不释放结构体，供下一次使用）
+        dispatchFrameToListener(mAvFrame);
         av_frame_unref(mAvFrame);
         receiveCount++;
 
@@ -538,14 +519,80 @@ double VideoDecoder::getDuration() {
  * @param frame 当前视频帧（用于上下文信息）
  * @return true 调用方应渲染该帧；false 应丢弃该帧。
  */
+bool VideoDecoder::isBeforePrecisionSeekTarget(int64_t normPtsMs) const {
+    if (mPrecisionSeekTargetNormMs < 0) {
+        return false;
+    }
+    if (normPtsMs == AV_NOPTS_VALUE) {
+        return true;
+    }
+    return normPtsMs < mPrecisionSeekTargetNormMs;
+}
+
+void VideoDecoder::onPrecisionSeekFrameDisplayed() {
+    if (mPrecisionSeekTargetNormMs < 0) {
+        return;
+    }
+    mSeekPos = INT64_MAX;
+    mPrecisionSeekTargetNormMs = -1;
+}
+
+void VideoDecoder::cancelPrecisionSeekPending() {
+    mPrecisionSeekOutputPending = false;
+    mPrecisionSeekTargetNormMs = -1;
+    mDropExtraFramesThisDecode = false;
+}
+
+void VideoDecoder::releaseMediacodecFrameIfNeeded(AVFrame *frame) {
+    if (frame != nullptr && frame->format == AV_PIX_FMT_MEDIACODEC) {
+        av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
+    }
+}
+
+void VideoDecoder::dispatchFrameToListener(AVFrame *frame) {
+    bool isEvenEdge = isEven(frame->width) && isEven(frame->height);
+    if (frame->format == hw_pix_fmt || frame->format == AV_PIX_FMT_RGB24
+        || (isEvenEdge && (frame->format == AV_PIX_FMT_YUV420P || frame->format == AV_PIX_FMT_NV12))) {
+        if (mOnFrameArrivedListener) {
+            mOnFrameArrivedListener(frame);
+        }
+    } else if (frame->format != AV_PIX_FMT_NONE) {
+        AVFrame *swFrame = av_frame_alloc();
+        int size = av_image_get_buffer_size(AV_PIX_FMT_RGBA, frame->width, frame->height, 1);
+        auto *buffer = static_cast<uint8_t *>(av_malloc(size * sizeof(uint8_t)));
+        av_image_fill_arrays(swFrame->data, swFrame->linesize, buffer, AV_PIX_FMT_RGBA,
+                            frame->width, frame->height, 1);
+        if (swsScale(frame, swFrame) > 0 && mOnFrameArrivedListener) {
+            mOnFrameArrivedListener(swFrame);
+        }
+        av_frame_free(&swFrame);
+        av_freep(&swFrame);
+        av_free(buffer);
+    } else {
+        LOGE("[video] frame format is AV_PIX_FMT_NONE")
+    }
+}
+
 bool VideoDecoder::avSync(AVFrame *frame) {
     int64_t normPts = mCurTimeStampMs - mStreamStartPtsMs;
 
     if (mMediaClock) {
+        // 仅在 decode 仍在等「>= 目标」时挡帧；兜底出画后 pending 已清，不应再挡
+        if (mPrecisionSeekOutputPending && isBeforePrecisionSeekTarget(normPts)) {
+            return false;
+        }
+
+        if (mMediaClock->isPaused()) {
+            if (mMediaClock->getSyncType() == MediaClock::SyncType::VIDEO_MASTER) {
+                mMediaClock->updateVideoClock(normPts);
+            }
+            return true;
+        }
+
         int64_t now = mMediaClock->nowMs();
         int64_t diff = normPts - now;
 
-        // 视频严重落后 → 丢帧，避免越拖越远
+        // 视频严重落后 → 丢帧（仅正常播放；精确 seek 已由 mPrecisionSeekTargetNormMs 约束）
         if (diff < -AV_SYNC_DROP_MS) {
             LOGW("[video] drop late frame, pts=%" PRId64 " ms, clock=%" PRId64 " ms, diff=%" PRId64 " ms",
                  normPts, now, diff)
@@ -595,6 +642,7 @@ bool VideoDecoder::avSync(AVFrame *frame) {
  * @return 成功返回 0，失败返回错误代码
  */
 int VideoDecoder::seek(double pos) {
+    cancelPrecisionSeekPending();
     // ★ demuxer 的 avformat_seek_file 已由 ReadPacketLoop 统一执行（mFtx 只有一个全局读指针，
     //   音视频解码线程不可各自 seek，否则会互相覆盖位置且对 AVFormatContext 形成数据竞争）。
     //   这里只做"解码器本地"的两件事：
@@ -606,11 +654,17 @@ int VideoDecoder::seek(double pos) {
     // 即便不再调用 avformat_seek_file，仍需要把 pos 换算到本流的 time_base，
     // 因为 decode 循环里要拿 mSeekPos 与 frame->pts 比较来判断"已追到目标"。
     int64_t seekPos = av_rescale_q((int64_t)(pos * AV_TIME_BASE), AV_TIME_BASE_Q, mTimeBase);
+    AVStream *st = mFtx->streams[getStreamIndex()];
+    if (st != nullptr && st->start_time != AV_NOPTS_VALUE) {
+        seekPos += st->start_time;
+    }
 
     LOGE("[video] decoder-side seek prep: pos=%f, seekPos(in video tb)=%" PRId64, pos, seekPos)
 
     mFixStartTime = true;
     mSeekPos = seekPos;
+    mPrecisionSeekTargetNormMs = (int64_t)(pos * 1000);
+    mPrecisionSeekOutputPending = true;
     mSeekStartTimeMs = getCurrentTimeMs();
 
     return 0;
@@ -634,6 +688,9 @@ void VideoDecoder::release() {
     mFixStartTime = false;
     mStartTimeMsForSync = -1;
     mSeekPos = INT64_MAX;
+    mPrecisionSeekTargetNormMs = -1;
+    mPrecisionSeekOutputPending = false;
+    mDropExtraFramesThisDecode = false;
 
     // 释放视频帧
     if (mAvFrame != nullptr) {

@@ -145,6 +145,7 @@ private:
     bool mVideoStreamEnded = false;                  ///< 视频流是否已解码完毕（mEofMutex 守护）
     bool mAudioStreamEnded = false;                  ///< 音频流是否已解码完毕（mEofMutex 守护）
     std::atomic<bool> mPlayCompletedNotified{false}; ///< 是否已回调 onPlayCompleted（保证只通知一次）
+    std::atomic<bool> mPauseVideoPreviewRendered{false}; ///< PAUSE 预取预览是否已渲染至少一帧视频
 
     std::shared_ptr<MutexObj> mMutexObj = nullptr;   ///< 线程同步互斥锁
 
@@ -184,8 +185,8 @@ private:
     /** @brief 处理行对齐的数据拷贝 */
     static void checkStrideAndFill(JNIEnv *env, jbyteArray *component, int width, int height, int lineStride, int pixelStride, uint8_t *src);
 
-    /** @brief 读取一个 AVPacket 并分发到对应队列 */
-    int readAvPacketToQueue();
+    /** @brief 读取一个 AVPacket 并分发到对应队列；videoOnly 时仅入视频队列（PAUSE 预览用） */
+    int readAvPacketToQueue(bool videoOnly = false);
 
     /** @brief 将 AVPacket 推入指定队列（阻塞等待队列不满） */
     bool pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVPacketQueue>& queue) const;
@@ -203,7 +204,7 @@ private:
     /**
      * @brief 消费 seek 队列（仅 ReadPacketLoop 调用，每轮最多处理一次）
      * @details 取最新 → applySeekInternal 一次 → return，使本轮仍能 readAvPacketToQueue。
-     *          列表若仍有待处理（高频拖动），mIsSeek 保持 true，下轮再 drain。
+     *          列表若仍有待处理（高频拖动），下轮再 drain。
      */
     void drainWillSeekPointsList();
 
@@ -212,6 +213,9 @@ private:
      * @details 仅 ReadPacketLoop 调用
      */
     void applySeekInternal(double timeS);
+
+    /** @brief PAUSE 状态下 seek 后读包，直到解码并渲染一帧视频（不读音频） */
+    void prefetchPauseVideoFrame();
 
     void updatePlayerState(PlayerState state);  ///< 更新播放器状态
     void onPlayCompleted(JNIEnv *env);          ///< 播放完成处理（已带去重）

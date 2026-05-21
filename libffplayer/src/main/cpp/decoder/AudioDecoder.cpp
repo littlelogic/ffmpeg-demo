@@ -135,25 +135,25 @@ int AudioDecoder::decode(AVPacket *avPacket) {
         auto ptsMs = mAvFrame->pts * av_q2d(mFtx->streams[getStreamIndex()]->time_base) * 1000;
         LOGI("[audio] avcodec_receive_frame...pts: %" PRId64 ", time: %f, need retry: %d", mAvFrame->pts, ptsMs, mNeedResent)
 
-        if (mSeekPos != INT64_MAX) {
-            int64_t ptsTb = framePtsInStreamTb(mAvFrame);
-            if (ptsTb != AV_NOPTS_VALUE && ptsTb < mSeekPos) {
-                LOGD("[audio] precision seek skip frame, ptsTb=%" PRId64 " < target=%" PRId64,
-                     ptsTb, mSeekPos)
-                av_frame_unref(mAvFrame);
-                receiveCount++;
-                continue;
-            }
-            if (ptsTb != AV_NOPTS_VALUE && ptsTb >= mSeekPos) {
-                LOGE("[audio] precision seek reached, ptsTb=%" PRId64 " target=%" PRId64,
-                     ptsTb, mSeekPos)
-                mSeekPos = INT64_MAX;
-            }
+        if (shouldDropForPrecisionSeek(mAvFrame)) {
+            LOGD("[audio] precision seek skip, normPts=%" PRId64 " targetNormMs=%" PRId64,
+                 frameNormPtsMs(mAvFrame), mPrecisionSeekTargetNormMs)
+            av_frame_unref(mAvFrame);
+            receiveCount++;
+            continue;
         }
 
         int nb = resample(mAvFrame);
 
         updateTimestamp(mAvFrame);
+        int64_t normPts = mCurTimeStampMs - mStreamStartPtsMs;
+        bool precisionReached = mPrecisionSeekTargetNormMs >= 0
+                                && normPts >= mPrecisionSeekTargetNormMs;
+        if (mSeekPos != INT64_MAX && precisionReached) {
+            LOGE("[audio] precision seek reached, normPts=%" PRId64, normPts)
+            mSeekPos = INT64_MAX;
+        }
+        markPrecisionSeekCompleteIfReached(normPts);
 
         int out_channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
 
@@ -271,12 +271,14 @@ int AudioDecoder::seek(double pos) {
     mFixStartTime = true;
     mNeedFlushRender = true;
     mSeekPos = seekPos;
+    mPrecisionSeekTargetNormMs = (int64_t)(pos * 1000);
     return 0;
 }
 
 void AudioDecoder::release() {
     mFixStartTime = false;
     mSeekPos = INT64_MAX;
+    mPrecisionSeekTargetNormMs = -1;
     mNeedFlushRender = false;
     if (mAudioBuffer != nullptr) {
         av_free(mAudioBuffer);

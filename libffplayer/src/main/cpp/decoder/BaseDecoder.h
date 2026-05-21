@@ -91,6 +91,18 @@ protected:
     /** 将帧 PTS 转为毫秒（无有效 PTS 返回 AV_NOPTS_VALUE） */
     int64_t framePtsMs(const AVFrame *frame) const;
 
+    /** 与 MediaClock 对齐的归一化媒体时间（ms） */
+    int64_t frameNormPtsMs(const AVFrame *frame) const;
+
+    /// 精确 seek 目标（归一化 ms，-1 表示未激活）；播放/暂停 seek 后首帧须 >= 此值才输出
+    int64_t mPrecisionSeekTargetNormMs = -1;
+
+    /** 精确 seek 期间是否应丢弃该帧（无 PTS 也丢弃） */
+    bool shouldDropForPrecisionSeek(const AVFrame *frame) const;
+
+    /** updateTimestamp 之后调用：normPts 为归一化媒体 ms，达标则结束精确 seek 状态 */
+    void markPrecisionSeekCompleteIfReached(int64_t normPts);
+
 private:
     int mStreamIndex = -1;                 ///< 流索引
 };

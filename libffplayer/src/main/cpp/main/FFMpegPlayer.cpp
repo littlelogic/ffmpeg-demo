@@ -14,6 +14,7 @@
 #include "FFMpegPlayer.h"
 #include "../vendor/nlohmann/json.hpp"
 #include "header/CommonUtils.h"
+#include <unistd.h>
 
 FFMpegPlayer::FFMpegPlayer() {
     LOGI("FFMpegPlayer")
@@ -26,6 +27,27 @@ FFMpegPlayer::~FFMpegPlayer() {
     mPlayerJni.reset();
     LOGI("~FFMpegPlayer")
 }
+
+namespace {
+
+/** UI 秒数 → 流 time_base 下的 seek 时间戳（含 start_time，并尽量对齐索引关键帧） */
+int64_t buildStreamSeekTimestamp(AVFormatContext *ftx, int streamIdx, double timeS) {
+    AVStream *st = ftx->streams[streamIdx];
+    int64_t seekTs = av_rescale_q((int64_t)(timeS * AV_TIME_BASE), AV_TIME_BASE_Q, st->time_base);
+    if (st->start_time != AV_NOPTS_VALUE) {
+        seekTs += st->start_time;
+    }
+    const AVIndexEntry *entry = avformat_index_get_entry_from_timestamp(
+            st, seekTs, AVSEEK_FLAG_BACKWARD);
+    if (entry != nullptr && entry->timestamp != AV_NOPTS_VALUE) {
+        int64_t indexedTs = entry->timestamp;
+        LOGI("[seek] index keyframe ts=%" PRId64 " (wanted=%" PRId64 ")", indexedTs, seekTs);
+        seekTs = indexedTs;
+    }
+    return seekTs;
+}
+
+}  // namespace
 
 /**
  * @brief 初始化 JNI 回调上下文
@@ -354,8 +376,9 @@ void FFMpegPlayer::ReadPacketLoop() {
             // double check stop state
             // or check pause state for pause & seek
 
-            // PAUSE 下 seek 只入 willSeekPointsList；wakeUp 后在此消费队列。
+            // PAUSE 下 seek 只入 willSeekPointsList；wakeUp 后消费队列并预取一帧视频预览（无声）。
             drainWillSeekPointsList();
+            prefetchPauseVideoFrame();
             continue;
         }
 
@@ -388,17 +411,11 @@ double FFMpegPlayer::takeLatestSeekPoint() {
 void FFMpegPlayer::drainWillSeekPointsList() {
     double timeS = takeLatestSeekPoint();
     if (timeS < 0) {
-        mIsSeek = false;
         return;
     }
-    mIsSeek = true;
     LOGW("FFMpegPlayer::drainWillSeekPointsList apply latest=%f", timeS)
     applySeekInternal(timeS);
     // 每轮只处理一次 seek，本轮继续读包；若 apply 期间 UI 又入队，下轮再 drain。
-    {
-        std::lock_guard<std::mutex> lk(mWillSeekMutex);
-        mIsSeek = !mWillSeekPointsList.empty();
-    }
 }
 
 void FFMpegPlayer::applySeekInternal(double timeS) {
@@ -410,13 +427,20 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
     }
     mPlayCompletedNotified.store(false);
 
+    if (mVideoDecoder != nullptr) {
+        mVideoDecoder->cancelPrecisionSeekPending();
+    }
+
     if (mVideoPacketQueue != nullptr) {
-        mVideoSeekPos.store(timeS);
         mVideoPacketQueue->clear();
+        mVideoSeekPos.store(timeS);
+        mVideoPacketQueue->notify();
     }
     if (mAudioPacketQueue != nullptr) {
-        mAudioSeekPos.store(timeS);
         mAudioPacketQueue->clear();
+        // 仍通知音频解码线程 flush；PAUSE 时 apply 不等待 audio（见下方 wait）。
+        mAudioSeekPos.store(timeS);
+        mAudioPacketQueue->notify();
     }
 
     if (mMediaClock) {
@@ -439,11 +463,20 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
     }
 
     if (refStreamIdx >= 0 && mFtx != nullptr) {
-        int64_t seekTs = av_rescale_q((int64_t)(timeS * AV_TIME_BASE),
-                                      AV_TIME_BASE_Q, refTb);
+        int64_t seekTs = buildStreamSeekTimestamp(mFtx, refStreamIdx, timeS);
         int sret = avformat_seek_file(mFtx, refStreamIdx,
                                       INT64_MIN, seekTs, INT64_MAX,
                                       AVSEEK_FLAG_BACKWARD);
+        if (sret < 0) {
+            int64_t globalTs = (int64_t)(timeS * AV_TIME_BASE);
+            AVStream *st = mFtx->streams[refStreamIdx];
+            if (st->start_time != AV_NOPTS_VALUE) {
+                globalTs += av_rescale_q(st->start_time, st->time_base, AV_TIME_BASE_Q);
+            }
+            sret = av_seek_frame(mFtx, refStreamIdx, globalTs, AVSEEK_FLAG_BACKWARD);
+            LOGW("[seek] avformat_seek_file failed, av_seek_frame ret=%d globalTs=%" PRId64,
+                 sret, globalTs);
+        }
         LOGI("[seek] demuxer seek done: timeS=%f refStream=%d ts=%" PRId64 " ret=%d",
              timeS, refStreamIdx, seekTs, sret)
     } else {
@@ -451,12 +484,74 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
              timeS, refStreamIdx, mFtx)
     }
 
-    while (mVideoSeekPos.load() >= 0 || mAudioSeekPos.load() >= 0) {
-        LOGI("seek wait for decoder flush...mVideoSeekPos: %f, mAudioSeekPos: %f",
-             mVideoSeekPos.load(), mAudioSeekPos.load())
-        mMutexObj->wait();
+    int waitRounds = 0;
+    static const int kSeekFlushMaxRounds = 400;  // 约 2s（5ms * 400），避免读包线程永久卡死
+    while (true) {
+        bool videoPending = mVideoDecoder != nullptr && mVideoSeekPos.load() >= 0;
+        bool audioPending = mPlayerState != PlayerState::PAUSE
+                            && mAudioDecoder != nullptr && mAudioSeekPos.load() >= 0;
+        if (!videoPending && !audioPending) {
+            break;
+        }
+        if (++waitRounds > kSeekFlushMaxRounds) {
+            LOGE("[seek] flush wait timeout, force clear seek flags timeS=%f videoSeek=%f audioSeek=%f",
+                 timeS, mVideoSeekPos.load(), mAudioSeekPos.load())
+            mVideoSeekPos.store(kSeekPosUnset);
+            mAudioSeekPos.store(kSeekPosUnset);
+            if (mVideoDecoder != nullptr) {
+                mVideoDecoder->cancelPrecisionSeekPending();
+            }
+            if (mVideoPacketQueue != nullptr) {
+                mVideoPacketQueue->notify();
+            }
+            if (mAudioPacketQueue != nullptr) {
+                mAudioPacketQueue->notify();
+            }
+            break;
+        }
+        if (waitRounds % 20 == 1) {
+            LOGI("seek wait for decoder flush...pause=%d mVideoSeekPos: %f, mAudioSeekPos: %f",
+                 mPlayerState == PlayerState::PAUSE, mVideoSeekPos.load(), mAudioSeekPos.load())
+        }
+        if (mVideoPacketQueue != nullptr) {
+            mVideoPacketQueue->notify();
+        }
+        if (mAudioPacketQueue != nullptr) {
+            mAudioPacketQueue->notify();
+        }
+        mMutexObj->wakeUp();
+        usleep(5000);
     }
     LOGW("FFMpegPlayer::applySeekInternal done, timeS=%f", timeS)
+}
+
+void FFMpegPlayer::prefetchPauseVideoFrame() {
+    if (mPlayerState != PlayerState::PAUSE || mVideoDecoder == nullptr || mVideoPacketQueue == nullptr) {
+        return;
+    }
+    mPauseVideoPreviewRendered.store(false);
+
+    static const int kMaxPackets = 2000;
+    int packetsRead = 0;
+    for (; packetsRead < kMaxPackets; packetsRead++) {
+        if (mPlayerState != PlayerState::PAUSE || mHasAbort) {
+            break;
+        }
+        if (mPauseVideoPreviewRendered.load()) {
+            LOGI("[pause-preview] video frame rendered, packets read=%d", packetsRead)
+            break;
+        }
+        if (readAvPacketToQueue(true) != 0) {
+            LOGW("[pause-preview] read end or error at packet %d", packetsRead)
+            break;
+        }
+    }
+    if (!mPauseVideoPreviewRendered.load()) {
+        LOGW("[pause-preview] no frame rendered after %d packets, cancel precision gate", packetsRead)
+        if (mVideoDecoder != nullptr) {
+            mVideoDecoder->cancelPrecisionSeekPending();
+        }
+    }
 }
 
 /**
@@ -466,32 +561,42 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
  *   - 读取失败（EOF）：向两个队列发送 flush packet（size=0, data=nullptr）
  * @return 成功返回 0，EOF 或错误返回 -1
  */
-int FFMpegPlayer::readAvPacketToQueue() {
+int FFMpegPlayer::readAvPacketToQueue(bool videoOnly) {
     AVPacket *avPacket = av_packet_alloc();
     int ret = av_read_frame(mFtx, avPacket);
     bool suc = false;
     if (ret == 0) {
         if (mVideoDecoder && mVideoPacketQueue && avPacket->stream_index == mVideoDecoder->getStreamIndex()) {
             suc = pushPacketToQueue(avPacket, mVideoPacketQueue);
-        } else if (mAudioDecoder && mAudioPacketQueue && avPacket->stream_index == mAudioDecoder->getStreamIndex()) {
+        } else if (!videoOnly && mAudioDecoder && mAudioPacketQueue
+                   && avPacket->stream_index == mAudioDecoder->getStreamIndex()) {
             suc = pushPacketToQueue(avPacket, mAudioPacketQueue);
+        } else if (videoOnly) {
+            // PAUSE 预览：丢弃音频及其它流 packet，避免写入 AudioTrack
+            av_packet_free(&avPacket);
+            av_freep(&avPacket);
+            return 0;
         }
     } else {
         // send flush packet
-        AVPacket *videoFlushPkt = av_packet_alloc();
-        videoFlushPkt->size = 0;
-        videoFlushPkt->data = nullptr;
-        if (!pushPacketToQueue(videoFlushPkt, mVideoPacketQueue)) {
-            av_packet_free(&videoFlushPkt);
-            av_freep(&videoFlushPkt);
+        if (mVideoPacketQueue) {
+            AVPacket *videoFlushPkt = av_packet_alloc();
+            videoFlushPkt->size = 0;
+            videoFlushPkt->data = nullptr;
+            if (!pushPacketToQueue(videoFlushPkt, mVideoPacketQueue)) {
+                av_packet_free(&videoFlushPkt);
+                av_freep(&videoFlushPkt);
+            }
         }
 
-        AVPacket *audioFlushPkt = av_packet_alloc();
-        audioFlushPkt->size = 0;
-        audioFlushPkt->data = nullptr;
-        if (!pushPacketToQueue(audioFlushPkt, mAudioPacketQueue)) {
-            av_packet_free(&audioFlushPkt);
-            av_freep(&audioFlushPkt);
+        if (!videoOnly && mAudioPacketQueue) {
+            AVPacket *audioFlushPkt = av_packet_alloc();
+            audioFlushPkt->size = 0;
+            audioFlushPkt->data = nullptr;
+            if (!pushPacketToQueue(audioFlushPkt, mAudioPacketQueue)) {
+                av_packet_free(&audioFlushPkt);
+                av_freep(&audioFlushPkt);
+            }
         }
         LOGE("read packet...end or failed: %d", ret)
         ret = -1;
@@ -508,25 +613,18 @@ int FFMpegPlayer::readAvPacketToQueue() {
 /**
  * @brief 将 AVPacket 推入指定队列
  * @details 如果队列已满，阻塞等待 10ms 直到有空间
- *          如果正在 Seek，丢弃 packet
  */
 bool FFMpegPlayer::pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVPacketQueue>& queue) const {
     if (queue == nullptr) {
         return false;
     }
 
-    bool suc = false;
     while (queue->isFull()) {
         queue->wait(10);
         LOGD("queue is full, wait 10ms, packet index: %d", packet->stream_index)
     }
-    if (!mIsSeek) {
-        queue->push(packet);
-        suc = true;
-    } else {
-        LOGE("discard packet for seek, packet index: %d", packet->stream_index)
-    }
-    return suc;
+    queue->push(packet);
+    return true;
 }
 
 /**
@@ -579,6 +677,15 @@ void FFMpegPlayer::VideoDecodeLoop() {
         }
 
         doRender(env, finalFrame);
+        mVideoDecoder->onPrecisionSeekFrameDisplayed();
+
+        if (mPlayerState == PlayerState::PAUSE) {
+            mPauseVideoPreviewRendered.store(true);
+            // 目标帧已上屏，丢弃预取阶段队列里剩余的 packet，避免再闪中间帧
+            if (mVideoPacketQueue != nullptr) {
+                mVideoPacketQueue->clear();
+            }
+        }
 
         // 无音轨时，进度由视频驱动回调
         if (!mAudioDecoder && mPlayerJni.isValid()) {
@@ -588,22 +695,23 @@ void FFMpegPlayer::VideoDecodeLoop() {
     });
 
     while (true) {
+        if (mHasAbort) {
+            LOGE("[video] has abort...")
+            break;
+        }
+
         if (mVideoSeekPos.load() >= 0) {
             mVideoPacketQueue->clear();
             mVideoDecoder->seek(mVideoSeekPos.load());
             mVideoSeekPos.store(kSeekPosUnset);
             LOGI("clear video queue via seek")
             mMutexObj->wakeUp();
+            continue;
         }
 
-        while (!mHasAbort && mVideoPacketQueue->isEmpty() && mVideoSeekPos.load() < 0) {
-            LOGE("[video] no packet, wait...")
-            mVideoPacketQueue->wait();
-        }
-
-        if (mHasAbort) {
-            LOGE("[video] has abort...")
-            break;
+        if (mVideoPacketQueue->isEmpty()) {
+            mVideoPacketQueue->wait(10);
+            continue;
         }
 
         AVPacket *packet = av_packet_alloc();
@@ -623,6 +731,7 @@ void FFMpegPlayer::VideoDecodeLoop() {
             } else {
                 LOGE("VideoDecodeLoop pop packet failed...")
             }
+            av_packet_free(&packet);
         }
     }
 
@@ -653,6 +762,10 @@ void FFMpegPlayer::AudioDecodeLoop() {
 
     mAudioDecoder->setOnFrameArrived([this, env](AVFrame *frame) {
         if (!mHasAbort && mAudioDecoder) {
+            // PAUSE 预览只刷视频，不向 AudioTrack 送 PCM
+            if (mPlayerState == PlayerState::PAUSE) {
+                return;
+            }
             mAudioDecoder->avSync(frame);
             doRender(env, frame);
             if (mPlayerJni.isValid()) {
@@ -665,22 +778,23 @@ void FFMpegPlayer::AudioDecodeLoop() {
     });
 
     while (true) {
+        if (mHasAbort) {
+            LOGE("[audio] has abort...")
+            break;
+        }
+
         if (mAudioSeekPos.load() >= 0) {
             mAudioPacketQueue->clear();
             mAudioDecoder->seek(mAudioSeekPos.load());
             mAudioSeekPos.store(kSeekPosUnset);
             LOGI("clear audio queue via seek")
             mMutexObj->wakeUp();
+            continue;
         }
 
-        while (!mHasAbort && mAudioPacketQueue->isEmpty() && mAudioSeekPos.load() < 0) {
-             LOGE("[audio] no packet, wait...")
-             mAudioPacketQueue->wait();
-        }
-
-        if (mHasAbort) {
-            LOGE("[audio] has abort...")
-            break;
+        if (mAudioPacketQueue->isEmpty()) {
+            mAudioPacketQueue->wait(10);
+            continue;
         }
 
         AVPacket *packet = av_packet_alloc();
@@ -700,6 +814,7 @@ void FFMpegPlayer::AudioDecodeLoop() {
             } else {
                 LOGE("AudioDecodeLoop pop packet failed...")
             }
+            av_packet_free(&packet);
         }
     }
 
@@ -878,7 +993,6 @@ bool FFMpegPlayer::seek(double timeS) {
             mWillSeekPointsList.back() = timeS;
         }
     }
-    mIsSeek = true;
     if (mMutexObj) {
         mMutexObj->wakeUp();
     }

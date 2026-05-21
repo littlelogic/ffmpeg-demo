@@ -35,6 +35,34 @@ int64_t BaseDecoder::framePtsMs(const AVFrame *frame) const {
     return (int64_t)(ptsTb * av_q2d(mTimeBase) * 1000);
 }
 
+int64_t BaseDecoder::frameNormPtsMs(const AVFrame *frame) const {
+    int64_t ptsMs = framePtsMs(frame);
+    if (ptsMs == AV_NOPTS_VALUE) {
+        return AV_NOPTS_VALUE;
+    }
+    return ptsMs - mStreamStartPtsMs;
+}
+
+bool BaseDecoder::shouldDropForPrecisionSeek(const AVFrame *frame) const {
+    if (mPrecisionSeekTargetNormMs < 0) {
+        return false;
+    }
+    int64_t normPts = frameNormPtsMs(frame);
+    if (normPts == AV_NOPTS_VALUE) {
+        return true;
+    }
+    return normPts < mPrecisionSeekTargetNormMs;
+}
+
+void BaseDecoder::markPrecisionSeekCompleteIfReached(int64_t normPts) {
+    if (mPrecisionSeekTargetNormMs < 0) {
+        return;
+    }
+    if (normPts >= mPrecisionSeekTargetNormMs) {
+        mPrecisionSeekTargetNormMs = -1;
+    }
+}
+
 /**
  * @brief 构造函数
  * @details 从流中提取时间基（time_base）和时长（duration）
