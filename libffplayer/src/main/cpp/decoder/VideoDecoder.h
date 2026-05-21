@@ -75,6 +75,7 @@ private:
     void updateTimestamp(AVFrame *frame);     ///< 更新帧时间戳
     bool isBeforePrecisionSeekTarget(int64_t normPtsMs) const;
     void releaseMediacodecFrameIfNeeded(AVFrame *frame);
+    /** 第六步：按像素格式直通或转 RGBA 后，回调 mOnFrameArrivedListener */
     void dispatchFrameToListener(AVFrame *frame);
     int swsScale(AVFrame *srcFrame, AVFrame *swFrame); ///< 像素格式转换
 

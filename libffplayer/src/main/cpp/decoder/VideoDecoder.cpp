@@ -549,22 +549,44 @@ void VideoDecoder::releaseMediacodecFrameIfNeeded(AVFrame *frame) {
     }
 }
 
+/**
+ * @brief 将解码帧分发给渲染回调
+ * @details 对应 decode() 中「第六步：处理像素格式」的逻辑：
+ *   - 硬件格式 / RGB24 / 偶数尺寸的 YUV420P、NV12 → 直接回调
+ *   - 其他格式（如 YUV420P10LE）→ libswscale 转 RGBA 后再回调
+ *
+ * @param frame 解码得到的视频帧（调用方在回调返回后负责 av_frame_unref）
+ */
 void VideoDecoder::dispatchFrameToListener(AVFrame *frame) {
+    // ====== 第六步：处理像素格式 ======
+    // 检查宽高是否为偶数（某些图像处理需要偶数尺寸）
     bool isEvenEdge = isEven(frame->width) && isEven(frame->height);
+
+    // 如果是硬件格式、RGB24 或满足条件的 YUV 格式，直接输出
     if (frame->format == hw_pix_fmt || frame->format == AV_PIX_FMT_RGB24
         || (isEvenEdge && (frame->format == AV_PIX_FMT_YUV420P || frame->format == AV_PIX_FMT_NV12))) {
         if (mOnFrameArrivedListener) {
-            mOnFrameArrivedListener(frame);
+            mOnFrameArrivedListener(frame);  // 回调渲染器
         }
-    } else if (frame->format != AV_PIX_FMT_NONE) {
-        AVFrame *swFrame = av_frame_alloc();
+    }
+    // 其他格式需要转换为 RGBA 后才能渲染（如 YUV420P10LE 等）
+    else if (frame->format != AV_PIX_FMT_NONE) {
+        AVFrame *swFrame = av_frame_alloc();  // 分配输出帧缓冲
+        // 计算 RGBA 格式所需的缓冲大小
         int size = av_image_get_buffer_size(AV_PIX_FMT_RGBA, frame->width, frame->height, 1);
         auto *buffer = static_cast<uint8_t *>(av_malloc(size * sizeof(uint8_t)));
+        // 关联缓冲到帧结构
         av_image_fill_arrays(swFrame->data, swFrame->linesize, buffer, AV_PIX_FMT_RGBA,
                             frame->width, frame->height, 1);
-        if (swsScale(frame, swFrame) > 0 && mOnFrameArrivedListener) {
-            mOnFrameArrivedListener(swFrame);
+
+        // 执行格式转换（使用双线性插值）
+        if (swsScale(frame, swFrame) > 0) {
+            if (mOnFrameArrivedListener) {
+                mOnFrameArrivedListener(swFrame);  // 回调渲染器
+            }
         }
+
+        // 释放临时帧和缓冲
         av_frame_free(&swFrame);
         av_freep(&swFrame);
         av_free(buffer);
