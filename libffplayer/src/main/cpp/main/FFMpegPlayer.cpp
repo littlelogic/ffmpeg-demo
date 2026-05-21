@@ -432,6 +432,7 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
     }
 
     if (mVideoPacketQueue != nullptr) {
+        // 注意顺序：先 clear 掉旧包，再设置 seekPos，最后 notify 解码线程（可能正在等包），让它尽快感知到 seek 事件并刷新状态。
         mVideoPacketQueue->clear();
         mVideoSeekPos.store(timeS);
         mVideoPacketQueue->notify();
@@ -578,7 +579,22 @@ int FFMpegPlayer::readAvPacketToQueue(bool videoOnly) {
             return 0;
         }
     } else {
-        // send flush packet
+        if (ret == AVERROR_EOF) {
+            // 文件正常结束 → 发送 flush
+            LOGI("EOF reached");
+        } else if (ret == AVERROR(EAGAIN)) {
+            // 临时错误（通常是网络），不中止，继续读
+            LOGW("Temporary error (EAGAIN), will retry");
+            //todo 不发送 flush，继续下一轮读取
+        } else {
+            // 其他致命错误 → 中止
+            LOGE("Fatal error: %s", av_err2str(ret));
+            // send flush packet
+            ret = -1;
+        }
+
+        // 无论什么错误，都发送 flush packet
+        // 文件读取到末尾（EOF）时，send flush packet
         if (mVideoPacketQueue) {
             AVPacket *videoFlushPkt = av_packet_alloc();
             videoFlushPkt->size = 0;
