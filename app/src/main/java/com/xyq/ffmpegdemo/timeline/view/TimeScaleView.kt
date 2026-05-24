@@ -53,8 +53,11 @@ class TimeScaleView @JvmOverloads constructor(
     /** 可见区域左缘在内容坐标中的 x（用于裁剪绘制范围） */
     private var contentScrollX = 0
 
-    /** 可见时间轴区域宽度（= 视口右缘 − 左缘，已扣除 header 偏移） */
+    /** 可见时间轴区域宽度 */
     private var visibleWidthPx = 0
+
+    /** 可见时间轴右缘（timeline 本地坐标） */
+    private var visibleRightPx = 0
 
     private val density = resources.displayMetrics.density
     private val baselineOffsetPx = 1.5f * density
@@ -103,19 +106,14 @@ class TimeScaleView @JvmOverloads constructor(
         invalidate()
     }
 
-    /** 内容区水平滚动偏移（与 ScrollView 同步） */
-    fun setContentScrollX(scrollX: Int) {
-        val sx = scrollX.coerceAtLeast(0)
-        if (contentScrollX != sx) {
-            contentScrollX = sx
-            invalidate()
-        }
-    }
-
-    /** 设置可见时间轴宽度（由外部按 scrollX、header、viewport 计算） */
-    fun setViewportWidthPx(width: Int) {
-        if (visibleWidthPx != width) {
-            visibleWidthPx = width
+    /** 设置可见区间 [leftPx, rightPx)（timeline 本地坐标，已扣除 header/tailer 占位） */
+    fun setVisibleRange(leftPx: Int, rightPx: Int) {
+        val left = leftPx.coerceAtLeast(0)
+        val right = rightPx.coerceAtLeast(left)
+        if (contentScrollX != left || visibleRightPx != right) {
+            contentScrollX = left
+            visibleRightPx = right
+            visibleWidthPx = right - left
             invalidate()
         }
     }
@@ -136,25 +134,29 @@ class TimeScaleView @JvmOverloads constructor(
 
         val h = height.toFloat()
         val viewW = width
-        // 可见区间：contentScrollX 为 timeline 左缘，visibleWidthPx 为实际可见宽（非 ScrollView 全宽）
+        // 可见区间：与 ScrollView 视口 ∩ timeline 内容区（滑到尽头时右侧可能是 tailer，不满一屏）
         val visibleLeft = contentScrollX.toFloat()
-        val visibleW = if (visibleWidthPx > 0) {
-            visibleWidthPx.toFloat()
-        } else {
-            viewW.toFloat()
+        val visibleRight = when {
+            visibleRightPx > 0 -> visibleRightPx.toFloat()
+            visibleWidthPx > 0 -> (visibleLeft + visibleWidthPx).coerceAtMost(viewW.toFloat())
+            else -> viewW.toFloat()
         }
-        val visibleRight = (visibleLeft + visibleW).coerceAtMost(viewW.toFloat())
+        val visibleW = visibleRight - visibleLeft
         val baselineY = h - baselineOffsetPx
         val cellW = config.gridCellWidthPx
         val secSpanPx = config.secondSpanPx
         // 1 秒占几格宽，放大/缩小分档都基于此比值
         val secSpanCells = secSpanPx / cellW
 
-        ALog.i("TimeScaleView-onDraw-01-"
-                + " secSpanPx" + secSpanPx
-                + " visibleLeft" + visibleLeft
-                + " visibleW" + visibleW
-                + " cellW" + cellW
+        ALog.i("TimeScaleView-onDraw-"
+                + " secSpanPx:" + secSpanPx
+                + " contentScrollX:" + contentScrollX
+                + " visibleRightPx:" + visibleRightPx
+                + " visibleLeft:" + visibleLeft
+                + " visibleRight:" + visibleRight
+                + " visibleW:" + visibleW
+                + " viewW:" + viewW
+                + " cellW:" + cellW
         )
 
         canvas.drawRect(0f, 0f, viewW.toFloat(), h, bgPaint)

@@ -563,17 +563,52 @@ class MainActivity : AppCompatActivity() {
         return resources.displayMetrics.widthPixels / 2
     }
 
+    /**
+     * 计算 timeline 在视口中的可见区间（本地坐标）。
+     * 视口 [scrollX, scrollX+viewportW] 与 timeline [headerW, headerW+contentWidthPx] 求交；
+     * 滑到开头左侧可能是 header，滑到尽头右侧可能是 tailer，可见宽会小于 viewportW。
+     */
+    private fun computeTimelineVisibleRange(
+        scrollX: Int,
+        viewportW: Int,
+        headerW: Int,
+        contentWidthPx: Int,
+    ): Pair<Int, Int> {
+        if (contentWidthPx <= 0 || viewportW <= 0) return 0 to 0
+        val timelineStart = headerW
+        val timelineEnd = headerW + contentWidthPx
+        val viewStart = scrollX
+        val viewEnd = scrollX + viewportW
+        if (viewEnd <= timelineStart || viewStart >= timelineEnd) {
+            return 0 to 0
+        }
+        val intersectStart = maxOf(viewStart, timelineStart)
+        val intersectEnd = minOf(viewEnd, timelineEnd)
+        val visibleLeft = intersectStart - timelineStart
+        val visibleRight = intersectEnd - timelineStart
+        return visibleLeft to visibleRight
+    }
+
     private fun updateTimelineScrollOffset() {
         val headerW = trackHeaderWidthPx()
         val scrollX = mBinding.trackScrollView.scrollX
         val viewportW = mBinding.trackScrollView.width
-        val maxScroll = mTimelineConfig.contentWidthPx.coerceAtLeast(0)
-        val contentScrollLeft = (scrollX - headerW).coerceIn(0, maxScroll)
-        val contentScrollRight = (scrollX + viewportW - headerW).coerceIn(0, maxScroll)
-        val visibleTimelineW = (contentScrollRight - contentScrollLeft).coerceAtLeast(0)
-        mBinding.timeScaleView.setContentScrollX(contentScrollLeft)
-        mBinding.timeScaleView.setViewportWidthPx(visibleTimelineW)
-        mBinding.videoThumbSliderView.setContentScrollX(contentScrollLeft)
+        val contentWidthPx = mTimelineConfig.contentWidthPx.coerceAtLeast(0)
+        val (visibleLeft, visibleRight) = computeTimelineVisibleRange(
+            scrollX, viewportW, headerW, contentWidthPx,
+        )
+        val visibleTimelineW = (visibleRight - visibleLeft).coerceAtLeast(0)
+        ALog.i("MainActivity-updateTimelineScrollOffset-"
+                + " scrollX:" + scrollX
+                + " viewportW:" + viewportW
+                + " headerW:" + headerW
+                + " contentWidthPx:" + contentWidthPx
+                + " visibleLeft:" + visibleLeft
+                + " visibleRight:" + visibleRight
+                + " visibleTimelineW:" + visibleTimelineW
+        )
+        mBinding.timeScaleView.setVisibleRange(visibleLeft, visibleRight)
+        mBinding.videoThumbSliderView.setContentScrollX(visibleLeft)
         mBinding.videoThumbSliderView.setViewportWidthPx(visibleTimelineW)
     }
 
