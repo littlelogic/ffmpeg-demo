@@ -7,4 +7,12 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- 剪映风格时间刻度 -->
+    <color name="timeline_scale_bg">#FF141414</color>
+    <color name="timeline_tick_major">#B3FFFFFF</color>
+    <color name="timeline_tick_medium">#66FFFFFF</color>
+    <color name="timeline_tick_minor">#33FFFFFF</color>
+    <color name="timeline_label">#8CFFFFFF</color>
+    <color name="timeline_baseline">#26FFFFFF</color>
 </resources>

@@ -131,12 +131,14 @@
     </androidx.constraintlayout.widget.ConstraintLayout>
 
 
-    <android.widget.MyHorizontalScrollView
+    <com.xyq.ffmpegdemo.timeline.view.CustomHorizontalScrollView
         android:background="#000000"
         android:id="@+id/trackScrollView"
         app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginBottom="80dp"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="80dp">
 
 
@@ -157,13 +159,26 @@
             </androidx.constraintlayout.widget.ConstraintLayout>
 
 
-            <androidx.constraintlayout.widget.ConstraintLayout
+            <LinearLayout
                 android:id="@+id/trackContent"
                 android:background="#0F0C0C"
+                android:orientation="vertical"
                 android:layout_width="wrap_content"
                 android:layout_height="80dp">
 
-            </androidx.constraintlayout.widget.ConstraintLayout>
+                <com.xyq.ffmpegdemo.timeline.view.TimeScaleView
+                    android:id="@+id/time_scale_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp" />
+
+                <!-- 缩略图条带：一格与时间刻度一格对齐 -->
+                <com.xyq.ffmpegdemo.timeline.view.VideoThumbSliderView
+                    android:id="@+id/video_thumb_slider_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+            </LinearLayout>
 
 
             <androidx.constraintlayout.widget.ConstraintLayout
@@ -177,9 +192,35 @@
         </LinearLayout>
 
 
-    </android.widget.MyHorizontalScrollView>
+    </com.xyq.ffmpegdemo.timeline.view.CustomHorizontalScrollView>
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/centerLineOut"
+        app:layout_constraintBottom_toBottomOf="@+id/trackScrollView"
+        app:layout_constraintTop_toTopOf="@+id/trackScrollView"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginVertical="-15dp"
+        android:layout_width="0dp"
+        android:layout_height="0dp">
+
+        <View
+            android:id="@+id/centerLine"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            android:layout_width="1dp"
+            android:layout_height="0dp"
+            android:background="#2196F3" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>
+
+
+
+
 
 

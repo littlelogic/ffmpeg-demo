@@ -29,6 +29,7 @@ import com.donkingliang.imageselector2.model.ImageModel
 import com.donkingliang.imageselector2.utils.ImageSelector
 import com.xyq.ffmpegdemo.adapter.ThumbnailAdapter
 import com.xyq.ffmpegdemo.databinding.ActivityMainBinding
+import com.xyq.ffmpegdemo.timeline.TimelineConfig
 import com.xyq.ffmpegdemo.entity.Thumbnail
 import com.xyq.ffmpegdemo.player.IMediaPlayer
 import com.xyq.ffmpegdemo.player.IMediaPlayerStatusListener
@@ -61,9 +62,12 @@ class MainActivity : AppCompatActivity() {
     private var mVideoPathForThumbnail = ""
     private var mHasPermission = false
     private var mIsSeeking = false
+    private var mTrackUserScrolling = false
     private var mIsExporting = false
     private var mDuration = -1.0
     private var mThumbnailAdapter: ThumbnailAdapter? = null
+
+    private val mTimelineConfig = TimelineConfig()
 
     private lateinit var mVideoThumbnailViewModel: VideoThumbnailViewModel
     private lateinit var mPlayViewModel: PlayViewModel
@@ -95,6 +99,7 @@ class MainActivity : AppCompatActivity() {
 
         Tools.setApplication(this.application)
         ALog.setMark(Tools.isApkDebugable(application))
+
         Log.i(TAG, "onCreate: ")
         mBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(mBinding.root)
@@ -284,14 +289,25 @@ class MainActivity : AppCompatActivity() {
         val dm = resources.getDisplayMetrics()
         val width = dm.widthPixels
         val height = dm.heightPixels
-        mBinding.trackHeader.layoutParams.width = width/2
-        mBinding.trackTailer.layoutParams.width = width/2
-        mBinding.trackContent.layoutParams.width = width * 3
-//        mBinding.trackScrollView.add
+        mBinding.trackHeader.layoutParams.width = width / 2
+        mBinding.trackTailer.layoutParams.width = width / 2
 
 
+
+        mTimelineConfig.majorTickSpacingPx = TimelineConfig.majorTickSpacingPx(dm.density)
+        mTimelineConfig.pxPerSecond = TimelineConfig.defaultPxPerSecond(mTimelineConfig.majorTickSpacingPx)
+        mBinding.timeScaleView.setTimelineConfig(mTimelineConfig)
+        mBinding.videoThumbSliderView.setTimelineConfig(mTimelineConfig)
+
+        setupTrackScrollView(width / 2)
+
+        mBinding.trackScrollView.setOnTouchDownEventListener {
+            ALog.i("MainActivity-trackScrollView-onTouchDownEventListener")
+            mPlayViewModel.updatePlayState(false)
+        }
         mBinding.trackScrollView.addOnScrollListener(object : MyHorizontalScrollView.OnScrollListener() {
             override fun onScrollStateChanged(view: MyHorizontalScrollView, newState: Int) {
+                mTrackUserScrolling = newState != MyHorizontalScrollView.SCROLL_STATE_IDLE
                 when (newState) {
                     MyHorizontalScrollView.SCROLL_STATE_IDLE -> {
                         // fling 结束 / 用户离手且没启动惯性
@@ -315,23 +331,10 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onScrolled(view: MyHorizontalScrollView, dx: Int, dy: Int) {
-                // dx > 0 表示内容向右移动（scrollX 增大）
-                // dy 在 HorizontalScrollView 里几乎总是 0
-
-                val per = mBinding.trackScrollView.scrollX/(mBinding.trackContentView.width - view.width).toFloat()
-                ALog.i("MainActivity-trackScrollView-onScrollStateChanged-onScrolled"
-                        + " per" + per
-                        + " dx" + dx
-                        + " scrollX" + mBinding.trackScrollView.scrollX
-                        + " trackScrollView.width" + view.width
-                        + " trackContentView.width" + mBinding.trackContentView.width
-                )
-
-
-                val timestamp = per * mDuration
-                mPlayer.seek(timestamp)
-
-
+                updateTimelineScrollOffset()
+                if (mTrackUserScrolling && mIsVideo && mDuration > 0) {
+                    mPlayer.seek(getPlayheadTimeSec())
+                }
             }
         })
 
@@ -431,6 +434,7 @@ class MainActivity : AppCompatActivity() {
         mBinding.btnPlayer.visibility = visible
         mBinding.btnAudio.visibility = visible
         mBinding.seekBar.visibility = visible
+        mBinding.trackScrollView.visibility = visible
     }
 
     var playPath = ""
@@ -475,14 +479,24 @@ class MainActivity : AppCompatActivity() {
             mDuration = mPlayer.getDuration()
             Log.i(TAG, "startPlay: duration: $mDuration")
 
+            runOnUiThread {
+                if (isVideo && mDuration > 0) {
+                    setupTimeline(mDuration)
+                }
+            }
+
             mPlayer.setListener(object : IMediaPlayerStatusListener {
 
                 override fun onProgress(timestamp: Double) {
                     runOnUiThread {
-                        // seek bar: [0, 100]
                         if (!mIsSeeking) {
                             mBinding.seekBar.progress = ((timestamp / mDuration) * 100).toInt()
                             mBinding.tvTimer.text = CommonUtils.getTimeDesc(timestamp.toInt())
+                            if (mIsVideo && mDuration > 0 && !mTrackUserScrolling
+                                && !mBinding.trackScrollView.isPinchScaling
+                            ) {
+                                scrollTrackToTimeSec(timestamp)
+                            }
                         }
                     }
                 }
@@ -502,6 +516,70 @@ class MainActivity : AppCompatActivity() {
 
             mPlayer.start()
         }
+    }
+
+    private fun setupTrackScrollView(headerWidthPx: Int) {
+        mBinding.trackScrollView.setTimelineConfig(mTimelineConfig)
+        mBinding.trackScrollView.setTrackHeaderWidthPx(headerWidthPx)
+        mBinding.trackScrollView.setDurationSec(mDuration)
+        mBinding.trackScrollView.setScaleEnabled(mIsVideo && mDuration > 0)
+        mBinding.trackScrollView.setOnTimelineScaleListener { _, _ ->
+            applyTimelineConfigToViews()
+            applyTimelineLayout()
+            updateTimelineScrollOffset()
+        }
+    }
+
+    private fun setupTimeline(duration: Double) {
+        mTimelineConfig.durationSec = duration
+        if (mTimelineConfig.pxPerSecond <= 0) {
+            mTimelineConfig.pxPerSecond =
+                TimelineConfig.defaultPxPerSecond(mTimelineConfig.majorTickSpacingPx)
+        }
+        mBinding.trackScrollView.setDurationSec(duration)
+        mBinding.trackScrollView.setScaleEnabled(mIsVideo && duration > 0)
+        applyTimelineConfigToViews()
+        applyTimelineLayout()
+        updateTimelineScrollOffset()
+    }
+
+    private fun applyTimelineConfigToViews() {
+        mBinding.timeScaleView.setTimelineConfig(mTimelineConfig)
+        mBinding.videoThumbSliderView.setTimelineConfig(mTimelineConfig)
+    }
+
+    private fun applyTimelineLayout() {
+        val contentW = mTimelineConfig.contentWidthPx.coerceAtLeast(1)
+        mBinding.trackContent.layoutParams.width = contentW
+        mBinding.trackContent.requestLayout()
+        mBinding.trackContentView.requestLayout()
+    }
+
+    private fun trackHeaderWidthPx(): Int {
+        val lp = mBinding.trackHeader.layoutParams.width
+        if (lp > 0) return lp
+        val measured = mBinding.trackHeader.width
+        if (measured > 0) return measured
+        return resources.displayMetrics.widthPixels / 2
+    }
+
+    private fun updateTimelineScrollOffset() {
+        val headerW = trackHeaderWidthPx()
+        val scrollX = mBinding.trackScrollView.scrollX
+        val viewportW = mBinding.trackScrollView.width
+        val maxScroll = mTimelineConfig.contentWidthPx.coerceAtLeast(0)
+        val contentScrollLeft = (scrollX - headerW).coerceIn(0, maxScroll)
+        mBinding.timeScaleView.setContentScrollX(contentScrollLeft)
+        mBinding.timeScaleView.setViewportWidthPx(viewportW)
+        mBinding.videoThumbSliderView.setContentScrollX(contentScrollLeft)
+        mBinding.videoThumbSliderView.setViewportWidthPx(viewportW)
+    }
+
+    private fun getPlayheadTimeSec(): Double = mBinding.trackScrollView.getPlayheadTimeSec()
+
+    private fun scrollTrackToTimeSec(timeSec: Double) {
+        mBinding.trackScrollView.scrollToTimeSec(timeSec)
+        updateTimelineScrollOffset()
     }
 
     private fun fetchVideoThumbnail(path: String) {
