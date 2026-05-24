@@ -8,6 +8,7 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
 import androidx.core.content.ContextCompat
+import com.badlogic.utils.ALog
 import com.xyq.ffmpegdemo.R
 import com.xyq.ffmpegdemo.timeline.TimelineConfig
 import com.xyq.ffmpegdemo.timeline.TimelineConstants
@@ -16,32 +17,30 @@ import kotlin.math.ceil
 import kotlin.math.floor
 
 /**
- * 一秒内帧细分随 zoom（secondSpanPx / cellWidth）变化。
- * 时间刻度的开始的位置和缩略图是对应的关系
- * 时间刻度用，TimeScaleView，这个类名称，
- * 视频默认是30帧每秒，实际视频fps> 30fps,自己按照时间抽帧，实际视频fps< 30fps,自己按照时间加帧，
- * 默认是一秒一格，可以放大到1/30秒一格，最小可以缩到10秒一格，
- * 手指可以放大或者缩小时间刻度，
+ * 时间刻度层，与下方缩略图条带左缘 t=0 对齐，共用 [TimelineConfig]。
  *
- * 时间刻度的一格，对应的下面的缩略图的一格，最大可以对应10秒，最小可以对应1帧的时间，上来默认对应1秒的时间，也就是1/30秒，手指可以放大或者缩小时间刻度，
- * 时间刻度的一格，的宽度，先设置为50dp，后面可以调整，
- * 时间总的开始和结束的位置需要时间的标注，一各最多需要一个时间标注，至少也需要一个时间标注。
- * 整个时间轴上，只绘制秒，和帧，在秒和帧的下面，绘制一个竖线，
- * 一秒的时间在view上的跨度1/10 * 一格的宽度 到 30 * 一格的宽度，默认是一格的宽度。
- * 当一秒的跨度 >= 2 * 一格的宽度,秒中间显示15f的文字，
- * 当一秒的跨度 >= 3 * 一格的宽度,秒中间显示10f，20f的文字，等分一秒的空间
- * 当一秒的跨度 >= 5 * 一格的宽度,秒中间显示的文字 6f,12f,18f,24f,，等分一秒的空间
- * 当一秒的跨度 >= 6 * 一格的宽度,秒中间显示的等分值为30/6，显示一次累加等分一秒的空间
- * 当一秒的跨度 >= 10 * 一格的宽度,秒中间显示的等分值为30/10，显示一次累加等分一秒的空间
- * 当一秒的跨度 >= 15 * 一格的宽度,秒中间显示的等分值为30/15，显示一次累加等分一秒的空间
- * 当一秒的跨度 == 30 * 一格的宽度,秒中间显示的等分值为1，显示一次累加等分一秒的空间
+ * ## 度量
+ * - 一格宽度固定（默认 50dp，见 [TimelineConstants.DEFAULT_MAJOR_TICK_SPACING_DP]）
+ * - 捏合缩放改变「1 秒占多少像素」：cellWidth/10 ~ 30×cellWidth，默认 = cellWidth（1 格 1 秒）
+ * - 对应一格时间：10s ~ 1/30s（1 帧）
  *
- * 当一秒的跨度 < 2/2 * 一格的宽度,不显示帧数据，显示的单位为2秒，就是2的倍数才显示，
- * 当一秒的跨度 < 2/3 * 一格的宽度,不显示帧数据，显示的单位为3秒，就是3的倍数才显示，
- * 当一秒的跨度 < 2/4 * 一格的宽度,不显示帧数据，显示的单位为4秒，就是4的倍数才显示，
- * 当一秒的跨度 < 2/5 * 一格的宽度,不显示帧数据，显示的单位为5秒，就是5的倍数才显示，
- * 当一秒的跨度 < 2/6 * 一格的宽度,不显示帧数据，显示的单位为6秒，就是6的倍数才显示，
- * 当一秒的跨度 < 2/10 * 一格的宽度,不显示帧数据，显示的单位为10秒，就是10的倍数才显示，
+ * ## 绘制规则
+ * - 只绘制「秒」与「帧」；有文字时，文字下方画竖线；无文字则不画线
+ * - 起点、终点必标时间
+ *
+ * ## 放大（1 秒跨度 ≥ 2×格宽）：秒内帧标注，取满足条件的最高档
+ * | 1秒跨度 | 帧标注 |
+ * |---------|--------|
+ * | ≥ 2×格宽 | 15f |
+ * | ≥ 3×格宽 | 10f, 20f |
+ * | ≥ 5×格宽 | 6f, 12f, 18f, 24f |
+ * | ≥ 6×格宽 | 步长 5f |
+ * | ≥ 10×格宽 | 步长 3f |
+ * | ≥ 15×格宽 | 步长 2f |
+ * | = 30×格宽 | 步长 1f（1f~29f） |
+ *
+ * ## 缩小（1 秒跨度 < 1×格宽）：不显示帧，秒标注按 N 的倍数（阈值 = 2/N×格宽）
+ * 10s / 6s / 5s / 4s / 3s / 2s
  */
 class TimeScaleView @JvmOverloads constructor(
     context: Context,
@@ -50,12 +49,18 @@ class TimeScaleView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private val config = TimelineConfig()
+
+    /** 可见区域左缘在内容坐标中的 x（用于裁剪绘制范围） */
     private var contentScrollX = 0
-    private var viewportWidthPx = 0
+
+    /** 可见时间轴区域宽度（= 视口右缘 − 左缘，已扣除 header 偏移） */
+    private var visibleWidthPx = 0
 
     private val density = resources.displayMetrics.density
     private val baselineOffsetPx = 1.5f * density
+    /** 秒标注最小水平间距，正常缩放下用于降采样 */
     private val minSecondLabelSpacingPx = 48f * density
+    /** 帧标注过密时只画竖线、不画文字 */
     private val minFrameLabelSpacingPx = 28f * density
 
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -89,6 +94,7 @@ class TimeScaleView @JvmOverloads constructor(
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
     }
 
+    /** 同步时间轴配置；宽度随 [TimelineConfig.contentWidthPx] 变化 */
     fun setTimelineConfig(timeline: TimelineConfig) {
         config.durationSec = timeline.durationSec
         config.majorTickSpacingPx = timeline.majorTickSpacingPx
@@ -97,6 +103,7 @@ class TimeScaleView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** 内容区水平滚动偏移（与 ScrollView 同步） */
     fun setContentScrollX(scrollX: Int) {
         val sx = scrollX.coerceAtLeast(0)
         if (contentScrollX != sx) {
@@ -105,9 +112,10 @@ class TimeScaleView @JvmOverloads constructor(
         }
     }
 
+    /** 设置可见时间轴宽度（由外部按 scrollX、header、viewport 计算） */
     fun setViewportWidthPx(width: Int) {
-        if (viewportWidthPx != width) {
-            viewportWidthPx = width
+        if (visibleWidthPx != width) {
+            visibleWidthPx = width
             invalidate()
         }
     }
@@ -128,22 +136,38 @@ class TimeScaleView @JvmOverloads constructor(
 
         val h = height.toFloat()
         val viewW = width
-        val visibleW = if (viewportWidthPx > 0) viewportWidthPx else viewW
+        // 可见区间：contentScrollX 为 timeline 左缘，visibleWidthPx 为实际可见宽（非 ScrollView 全宽）
+        val visibleLeft = contentScrollX.toFloat()
+        val visibleW = if (visibleWidthPx > 0) {
+            visibleWidthPx.toFloat()
+        } else {
+            viewW.toFloat()
+        }
+        val visibleRight = (visibleLeft + visibleW).coerceAtMost(viewW.toFloat())
         val baselineY = h - baselineOffsetPx
         val cellW = config.gridCellWidthPx
         val secSpanPx = config.secondSpanPx
+        // 1 秒占几格宽，放大/缩小分档都基于此比值
         val secSpanCells = secSpanPx / cellW
+
+        ALog.i("TimeScaleView-onDraw-01-"
+                + " secSpanPx" + secSpanPx
+                + " visibleLeft" + visibleLeft
+                + " visibleW" + visibleW
+                + " cellW" + cellW
+        )
 
         canvas.drawRect(0f, 0f, viewW.toFloat(), h, bgPaint)
         canvas.drawLine(0f, baselineY, viewW.toFloat(), baselineY, baselinePaint)
 
-        val t0 = config.pxToTimeSec(contentScrollX.toFloat())
-        val t1 = config.pxToTimeSec((contentScrollX + visibleW).toFloat())
+        val t0 = config.pxToTimeSec(visibleLeft)
+        val t1 = config.pxToTimeSec(visibleRight)
         val duration = config.durationSec
 
         val secLabelStep = computeSecondLabelStep(secSpanPx, secSpanCells)
         val frameMarks = pickFrameMarks(secSpanCells)
 
+        // 向下取整
         val firstSec = floor(t0).toInt().coerceAtLeast(0)
         val lastSec = ceil(t1).toInt() + 1
 
@@ -151,29 +175,31 @@ class TimeScaleView @JvmOverloads constructor(
             if (sec > duration) break
             val secTime = sec.toDouble().coerceAtMost(duration)
             val x = config.timeSecToPx(secTime)
-            if (x < -80f || x > viewW + 80f) continue
+            if (x < visibleLeft - 80f || x > visibleRight + 80f) continue
 
             val showSecondLabel = shouldShowSecondLabel(sec, secLabelStep, duration)
             if (showSecondLabel) {
                 drawSecondMark(canvas, x, baselineY, h, formatSecondLabel(secTime))
             }
+            // 无秒标注时不画竖线
 
             if (secTime >= duration) continue
             val secEnd = (sec + 1).toDouble().coerceAtMost(duration)
             if (secEnd <= secTime) continue
 
-            drawFrameMarksInSecond(canvas, sec, secEnd, baselineY, h, viewW, frameMarks)
+            drawFrameMarksInSecond(canvas, sec, secEnd, baselineY, h, visibleLeft, visibleRight, frameMarks)
         }
 
+        // 终点非整秒时单独标注（如 10.5s）
         if (abs(duration - floor(duration)) > 1e-6) {
             val endX = config.timeSecToPx(duration)
-            if (endX in -80f..viewW + 80f) {
+            if (endX in (visibleLeft - 80f)..(visibleRight + 80f)) {
                 drawSecondMark(canvas, endX, baselineY, h, formatSecondLabel(duration))
             }
         }
     }
 
-    /** 秒标注：起止必标，中间按 step 降采样 */
+    /** 是否显示该整秒位置的秒标注：0 与 duration 必显，其余按 [step] 倍数 */
     private fun shouldShowSecondLabel(sec: Int, step: Int, duration: Double): Boolean {
         if (sec == 0) return true
         if (abs(sec - floor(duration)) < 1e-6 || abs(sec - ceil(duration)) < 1e-6) return true
@@ -181,8 +207,8 @@ class TimeScaleView @JvmOverloads constructor(
     }
 
     /**
-     * 缩小视图：1 秒跨度低于阈值时，按 N 秒的倍数标注，且不显示帧。
-     * 阈值 = 2/N × 一格宽度。
+     * 缩小视图下的秒标注步长（秒）；null 表示走正常 1 秒粒度。
+     * 条件：secSpanCells < 2/N × 格宽 → 每 N 秒标注一次。
      */
     private fun coarseSecondLabelStep(secSpanCells: Float): Int? {
         if (secSpanCells >= 2f / 2f) return null
@@ -197,6 +223,7 @@ class TimeScaleView @JvmOverloads constructor(
         }
     }
 
+    /** 秒标注间隔：优先 coarse 分档，否则按像素密度降采样 */
     private fun computeSecondLabelStep(secSpanPx: Float, secSpanCells: Float): Int {
         coarseSecondLabelStep(secSpanCells)?.let { return it }
         if (secSpanPx <= 0) return 1
@@ -208,8 +235,8 @@ class TimeScaleView @JvmOverloads constructor(
     }
 
     /**
-     * 根据 1 秒占格宽倍数，取最高档帧标注（互斥，取最细一档）。
-     * 1 秒跨度 < 1 格宽时不显示帧。
+     * 当前缩放下，每一秒内要标注的帧号列表（不含 0 和 30）。
+     * secSpanCells < 1 时不显示帧。
      */
     private fun pickFrameMarks(secSpanCells: Float): List<Int> {
         if (secSpanCells < 2f / 2f) return emptyList()
@@ -226,6 +253,7 @@ class TimeScaleView @JvmOverloads constructor(
         }
     }
 
+    /** 按步长生成帧号：step, 2×step, … 直到 29 */
     private fun frameStepMarks(step: Int): List<Int> {
         if (step <= 0) return emptyList()
         val marks = mutableListOf<Int>()
@@ -237,13 +265,15 @@ class TimeScaleView @JvmOverloads constructor(
         return marks
     }
 
+    /** 在 [sec, secEnd) 内绘制帧标注 */
     private fun drawFrameMarksInSecond(
         canvas: Canvas,
         sec: Int,
         secEnd: Double,
         baselineY: Float,
         h: Float,
-        viewW: Int,
+        visibleLeft: Float,
+        visibleRight: Float,
         frameMarks: List<Int>,
     ) {
         if (frameMarks.isEmpty()) return
@@ -253,10 +283,11 @@ class TimeScaleView @JvmOverloads constructor(
             val timeSec = sec + frame / TimelineConstants.NOMINAL_FPS
             if (timeSec >= secEnd - 1e-9) continue
             val x = config.timeSecToPx(timeSec)
-            if (x < -40f || x > viewW + 40f) continue
+            if (x < visibleLeft - 40f || x > visibleRight + 40f) continue
 
             val label = "${frame}f"
             val textW = frameTextPaint.measureText(label)
+            // 帧文字过密：仅保留竖线，避免重叠
             if (x - textW / 2f - lastLabelX < minFrameLabelSpacingPx && lastLabelX > Float.NEGATIVE_INFINITY) {
                 drawTickLine(canvas, x, baselineY, h * 0.68f, frameTickPaint)
                 continue
@@ -266,6 +297,7 @@ class TimeScaleView @JvmOverloads constructor(
         }
     }
 
+    /** 秒：文字 + 下方竖线 */
     private fun drawSecondMark(canvas: Canvas, x: Float, baselineY: Float, h: Float, label: String) {
         val fm = secondTextPaint.fontMetrics
         val textY = (baselineY - 5f * density) - fm.descent
@@ -276,6 +308,7 @@ class TimeScaleView @JvmOverloads constructor(
         drawTickLine(canvas, x, baselineY, lineTop, secondTickPaint)
     }
 
+    /** 帧：文字 + 下方竖线 */
     private fun drawFrameMark(canvas: Canvas, x: Float, baselineY: Float, h: Float, label: String) {
         val fm = frameTextPaint.fontMetrics
         val textY = (baselineY - 4f * density) - fm.descent
@@ -290,6 +323,7 @@ class TimeScaleView @JvmOverloads constructor(
         canvas.drawLine(x, topY, x, baselineY, paint)
     }
 
+    /** 整秒：MM:SS；带小数：MM:SS:帧号（30fps 名义） */
     private fun formatSecondLabel(timeSec: Double): String {
         val clamped = timeSec.coerceAtLeast(0.0)
         val totalSec = clamped.toInt()

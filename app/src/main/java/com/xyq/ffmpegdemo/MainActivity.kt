@@ -569,10 +569,12 @@ class MainActivity : AppCompatActivity() {
         val viewportW = mBinding.trackScrollView.width
         val maxScroll = mTimelineConfig.contentWidthPx.coerceAtLeast(0)
         val contentScrollLeft = (scrollX - headerW).coerceIn(0, maxScroll)
+        val contentScrollRight = (scrollX + viewportW - headerW).coerceIn(0, maxScroll)
+        val visibleTimelineW = (contentScrollRight - contentScrollLeft).coerceAtLeast(0)
         mBinding.timeScaleView.setContentScrollX(contentScrollLeft)
-        mBinding.timeScaleView.setViewportWidthPx(viewportW)
+        mBinding.timeScaleView.setViewportWidthPx(visibleTimelineW)
         mBinding.videoThumbSliderView.setContentScrollX(contentScrollLeft)
-        mBinding.videoThumbSliderView.setViewportWidthPx(viewportW)
+        mBinding.videoThumbSliderView.setViewportWidthPx(visibleTimelineW)
     }
 
     private fun getPlayheadTimeSec(): Double = mBinding.trackScrollView.getPlayheadTimeSec()
