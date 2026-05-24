@@ -128,6 +128,8 @@ class TimeScaleView @JvmOverloads constructor(
         super.onMeasure(widthSpec, heightMeasureSpec)
     }
 
+    val startBlank = 0
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (config.durationSec <= 0 || config.secondSpanPx <= 0) return
@@ -148,7 +150,7 @@ class TimeScaleView @JvmOverloads constructor(
         // 1 秒占几格宽，放大/缩小分档都基于此比值
         val secSpanCells = secSpanPx / cellW
 
-        ALog.i("TimeScaleView-onDraw-"
+        ALog.i("TimeScaleView-onDraw-01"
                 + " secSpanPx:" + secSpanPx
                 + " contentScrollX:" + contentScrollX
                 + " visibleRightPx:" + visibleRightPx
@@ -173,23 +175,32 @@ class TimeScaleView @JvmOverloads constructor(
         val firstSec = floor(t0).toInt().coerceAtLeast(0)
         val lastSec = ceil(t1).toInt() + 1
 
+
         for (sec in firstSec..lastSec) {
             if (sec > duration) break
+            ALog.i("-260524p1q-TimeScaleView-onDraw-11")
+
             val secTime = sec.toDouble().coerceAtMost(duration)
             val x = config.timeSecToPx(secTime)
-            if (x < visibleLeft - 80f || x > visibleRight + 80f) continue
+//            if (x < visibleLeft - 80f || x > visibleRight + 80f) continue
 
-            val showSecondLabel = shouldShowSecondLabel(sec, secLabelStep, duration)
-            if (showSecondLabel) {
-                drawSecondMark(canvas, x, baselineY, h, formatSecondLabel(secTime))
+            if ((x >= visibleLeft - 80f && x <= visibleRight + 80f)) {
+                val showSecondLabel = shouldShowSecondLabel(sec, secLabelStep, duration)
+                if (showSecondLabel) {
+                    drawSecondMark(canvas, x + startBlank, baselineY, h, formatSecondLabel(secTime))
+                }
             }
-            // 无秒标注时不画竖线
 
+            ALog.i("-260524p1q-TimeScaleView-onDraw-12")
+            // 无秒标注时不画竖线
             if (secTime >= duration) continue
             val secEnd = (sec + 1).toDouble().coerceAtMost(duration)
-            if (secEnd <= secTime) continue
+//            if (secEnd <= secTime) continue
+            ALog.i("-260524p1q-TimeScaleView-onDraw-13")
+            if (secSpanCells > 2f) {
+                drawFrameMarksInSecond(canvas, sec, secEnd, baselineY, h, visibleLeft, visibleRight, frameMarks)
+            }
 
-            drawFrameMarksInSecond(canvas, sec, secEnd, baselineY, h, visibleLeft, visibleRight, frameMarks)
         }
 
         // 终点非整秒时单独标注（如 10.5s）
@@ -278,13 +289,17 @@ class TimeScaleView @JvmOverloads constructor(
         visibleRight: Float,
         frameMarks: List<Int>,
     ) {
+        ALog.i("-260524p1q-TimeScaleView-drawFrameMarksInSecond-01")
         if (frameMarks.isEmpty()) return
         var lastLabelX = Float.NEGATIVE_INFINITY
         for (frame in frameMarks) {
+            ALog.i("-260524p1q-TimeScaleView-drawFrameMarksInSecond-11")
             if (frame <= 0 || frame >= TimelineConstants.FRAMES_PER_SEC) continue
             val timeSec = sec + frame / TimelineConstants.NOMINAL_FPS
+            ALog.i("-260524p1q-TimeScaleView-drawFrameMarksInSecond-12")
             if (timeSec >= secEnd - 1e-9) continue
             val x = config.timeSecToPx(timeSec)
+            ALog.i("-260524p1q-TimeScaleView-drawFrameMarksInSecond-13")
             if (x < visibleLeft - 40f || x > visibleRight + 40f) continue
 
             val label = "${frame}f"
@@ -294,7 +309,9 @@ class TimeScaleView @JvmOverloads constructor(
                 drawTickLine(canvas, x, baselineY, h * 0.68f, frameTickPaint)
                 continue
             }
-            drawFrameMark(canvas, x, baselineY, h, label)
+
+            ALog.i("-260524p1q-TimeScaleView-drawFrameMarksInSecond-89")
+            drawFrameMark(canvas, x + startBlank, baselineY, h, label)
             lastLabelX = x + textW / 2f
         }
     }
@@ -307,7 +324,7 @@ class TimeScaleView @JvmOverloads constructor(
         val drawX = (x - textW / 2f).coerceAtLeast(0f)
         canvas.drawText(label, drawX, textY, secondTextPaint)
         val lineTop = textY + fm.descent + 2f * density
-        drawTickLine(canvas, x, baselineY, lineTop, secondTickPaint)
+        drawTickLine(canvas, x+ startBlank, baselineY, lineTop, secondTickPaint)
     }
 
     /** 帧：文字 + 下方竖线 */
