@@ -129,7 +129,7 @@ public class CustomHorizontalScrollView extends MyHorizontalScrollView {
         if (viewportW <= 0) {
             return 0.0;
         }
-        float contentPx = getScrollX() + viewportW / 2f - trackHeaderWidthPx;
+        float contentPx = getScrollX() /*+ viewportW / 2f - trackHeaderWidthPx*/;
         double timeSec = timelineConfig.pxToTimeSec(contentPx);
         return Math.max(0.0, Math.min(durationSec, timeSec));
     }

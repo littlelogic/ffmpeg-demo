@@ -338,6 +338,10 @@ class MainActivity : AppCompatActivity() {
             override fun onScrolled(view: MyHorizontalScrollView, dx: Int, dy: Int) {
                 updateTimelineScrollOffset()
                 if (mTrackUserScrolling && mIsVideo && mDuration > 0) {
+                    val seekTime = getPlayheadTimeSec()
+                    ALog.i("MainActivity-trackScrollView-onScrollStateChanged-onScrolled"
+                            + " seekTime:" + seekTime
+                    )
                     mPlayer.seek(getPlayheadTimeSec())
                 }
             }
