@@ -219,7 +219,7 @@ class TimeScaleView @JvmOverloads constructor(
         }
 
         // 终点非整秒时单独标注（如 10.5s）
-        if (abs(duration - floor(duration)) > 1e-6) {
+        if (false&& abs(duration - floor(duration)) > 1e-6) {
             val endX = config.timeSecToPx(duration) + startBlank
             if (endX in (visibleLeft - 80f)..(visibleRight + 80f)) {
                 drawSecondMark(canvas, endX, baselineY, h, formatSecondLabel(duration))
@@ -274,7 +274,7 @@ class TimeScaleView @JvmOverloads constructor(
             secSpanCells >= 15f -> frameStepMarks(30 / 15)
             secSpanCells >= 10f -> frameStepMarks(30 / 10)
             secSpanCells >= 6f -> frameStepMarks(30 / 6)
-            secSpanCells >= 5f -> frameStepMarks(30 / 5)
+//            secSpanCells >= 5f -> frameStepMarks(30 / 5)
             secSpanCells >= 3f -> listOf(10, 20)
             secSpanCells >= 2f -> listOf(15)
             else -> emptyList()

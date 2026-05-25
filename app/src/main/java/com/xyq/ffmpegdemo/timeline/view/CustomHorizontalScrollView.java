@@ -143,13 +143,19 @@ public class CustomHorizontalScrollView extends MyHorizontalScrollView {
             return;
         }
         double clamped = Math.max(0.0, Math.min(durationSec, timeSec));
-        int contentW = timelineConfig.getContentWidthPx();
+        int scrollX = (int) timelineConfig.timeSecToPx(clamped);
+        if (getScrollX() != scrollX) {
+            scrollTo(scrollX, 0);
+        }
+
+
+        /*int contentW = timelineConfig.getContentWidthPx();
         float contentPos = trackHeaderWidthPx + timelineConfig.timeSecToPx(clamped);
         int maxScroll = Math.max(0, trackHeaderWidthPx + contentW + trackHeaderWidthPx - viewportW);
         int scrollX = (int) Math.max(0, Math.min(maxScroll, contentPos - viewportW / 2f));
         if (getScrollX() != scrollX) {
             scrollTo(scrollX, 0);
-        }
+        }*/
     }
 
     private void applyPxPerSecond(float pxPerSecond, boolean snapEnd) {
