@@ -289,9 +289,14 @@ class MainActivity : AppCompatActivity() {
         val dm = resources.getDisplayMetrics()
         val width = dm.widthPixels
         val height = dm.heightPixels
-        mBinding.trackHeader.layoutParams.width = width / 2
-        mBinding.trackTailer.layoutParams.width = width / 2
-
+//        mBinding.trackHeader.layoutParams.width = width / 2
+//        mBinding.trackTailer.layoutParams.width = width / 2
+//
+//        mBinding.trackHeader.layoutParams.width = 0
+//        mBinding.trackTailer.layoutParams.width = 0
+        mBinding.trackScrollView.layoutParams.width = width
+        mBinding.timeScaleView.setOutParentView(mBinding.trackScrollView)
+        mBinding.videoThumbSliderView.setOutParentView(mBinding.trackScrollView)
 
 
         mTimelineConfig.majorTickSpacingPx = TimelineConfig.majorTickSpacingPx(dm.density)
@@ -550,17 +555,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyTimelineLayout() {
         val contentW = mTimelineConfig.contentWidthPx.coerceAtLeast(1)
-        mBinding.trackContent.layoutParams.width = contentW
+        mBinding.trackContent.layoutParams.width = contentW + mBinding.trackScrollView.width
         mBinding.trackContent.requestLayout()
         mBinding.trackContentView.requestLayout()
-    }
-
-    private fun trackHeaderWidthPx(): Int {
-        val lp = mBinding.trackHeader.layoutParams.width
-        if (lp > 0) return lp
-        val measured = mBinding.trackHeader.width
-        if (measured > 0) return measured
-        return resources.displayMetrics.widthPixels / 2
     }
 
     /**
@@ -575,6 +572,10 @@ class MainActivity : AppCompatActivity() {
         contentWidthPx: Int,
     ): Pair<Int, Int> {
         if (contentWidthPx <= 0 || viewportW <= 0) return 0 to 0
+//        val visibleLeft = scrollX
+//        val visibleRight = scrollX + mBinding.trackScrollView.width
+//        return visibleLeft to visibleRight
+
         val timelineStart = headerW
         val timelineEnd = headerW + contentWidthPx
         val viewStart = scrollX
@@ -590,7 +591,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateTimelineScrollOffset() {
-        val headerW = trackHeaderWidthPx()
+//        val headerW = trackHeaderWidthPx()
+        val headerW = mBinding.trackScrollView.width/2
         val scrollX = mBinding.trackScrollView.scrollX
         val viewportW = mBinding.trackScrollView.width
         val contentWidthPx = mTimelineConfig.contentWidthPx.coerceAtLeast(0)

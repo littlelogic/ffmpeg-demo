@@ -97,6 +97,13 @@ class TimeScaleView @JvmOverloads constructor(
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
     }
 
+
+    var customHorizontalScrollView : CustomHorizontalScrollView? = null
+
+    fun setOutParentView(customHorizontalScrollView_ : CustomHorizontalScrollView) {
+        customHorizontalScrollView = customHorizontalScrollView_
+    }
+
     /** 同步时间轴配置；宽度随 [TimelineConfig.contentWidthPx] 变化 */
     fun setTimelineConfig(timeline: TimelineConfig) {
         config.durationSec = timeline.durationSec
@@ -119,7 +126,11 @@ class TimeScaleView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val w = config.contentWidthPx
+        var w = config.contentWidthPx
+        customHorizontalScrollView?.let {
+            w += it.width
+            startBlank = it.width/2
+        }
         val widthSpec = if (w > 0) {
             MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY)
         } else {
@@ -128,7 +139,7 @@ class TimeScaleView @JvmOverloads constructor(
         super.onMeasure(widthSpec, heightMeasureSpec)
     }
 
-    val startBlank = 0
+    var startBlank = 0
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -183,11 +194,15 @@ class TimeScaleView @JvmOverloads constructor(
             val secTime = sec.toDouble().coerceAtMost(duration)
             val x = config.timeSecToPx(secTime)
 //            if (x < visibleLeft - 80f || x > visibleRight + 80f) continue
+            if (sec == 1) {
+                ALog.i("-260524p1q-TimeScaleView-onDraw-test1")
+            }
 
-            if ((x >= visibleLeft - 80f && x <= visibleRight + 80f)) {
+            if ((x >= visibleLeft -80f && x <= visibleRight  + 80f)) {
+                //todo 会多次调用
                 val showSecondLabel = shouldShowSecondLabel(sec, secLabelStep, duration)
                 if (showSecondLabel) {
-                    drawSecondMark(canvas, x + startBlank, baselineY, h, formatSecondLabel(secTime))
+                    drawSecondMark(canvas, x + startBlank , baselineY, h, formatSecondLabel(secTime))
                 }
             }
 
@@ -205,7 +220,7 @@ class TimeScaleView @JvmOverloads constructor(
 
         // 终点非整秒时单独标注（如 10.5s）
         if (abs(duration - floor(duration)) > 1e-6) {
-            val endX = config.timeSecToPx(duration)
+            val endX = config.timeSecToPx(duration) + startBlank
             if (endX in (visibleLeft - 80f)..(visibleRight + 80f)) {
                 drawSecondMark(canvas, endX, baselineY, h, formatSecondLabel(duration))
             }
@@ -324,7 +339,7 @@ class TimeScaleView @JvmOverloads constructor(
         val drawX = (x - textW / 2f).coerceAtLeast(0f)
         canvas.drawText(label, drawX, textY, secondTextPaint)
         val lineTop = textY + fm.descent + 2f * density
-        drawTickLine(canvas, x+ startBlank, baselineY, lineTop, secondTickPaint)
+        drawTickLine(canvas, x, baselineY, lineTop, secondTickPaint)
     }
 
     /** 帧：文字 + 下方竖线 */

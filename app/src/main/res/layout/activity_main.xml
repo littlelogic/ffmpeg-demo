@@ -149,16 +149,6 @@
             android:layout_width="wrap_content"
             android:layout_height="80dp">
 
-
-            <androidx.constraintlayout.widget.ConstraintLayout
-                android:id="@+id/trackHeader"
-                android:background="#CAC2C2"
-                android:layout_width="wrap_content"
-                android:layout_height="80dp">
-
-            </androidx.constraintlayout.widget.ConstraintLayout>
-
-
             <LinearLayout
                 android:id="@+id/trackContent"
                 android:background="#0F0C0C"
@@ -179,15 +169,6 @@
                     android:layout_weight="1" />
 
             </LinearLayout>
-
-
-            <androidx.constraintlayout.widget.ConstraintLayout
-                android:id="@+id/trackTailer"
-                android:background="#CAC2C2"
-                android:layout_width="wrap_content"
-                android:layout_height="80dp">
-
-            </androidx.constraintlayout.widget.ConstraintLayout>
 
         </LinearLayout>
 

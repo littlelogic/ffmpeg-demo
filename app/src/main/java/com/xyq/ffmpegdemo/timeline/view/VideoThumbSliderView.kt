@@ -33,6 +33,12 @@ class VideoThumbSliderView @JvmOverloads constructor(
         style = Paint.Style.STROKE
     }
 
+    var customHorizontalScrollView : CustomHorizontalScrollView? = null
+
+    fun setOutParentView(customHorizontalScrollView_ : CustomHorizontalScrollView) {
+        customHorizontalScrollView = customHorizontalScrollView_
+    }
+
     fun setTimelineConfig(timeline: TimelineConfig) {
         config.durationSec = timeline.durationSec
         config.majorTickSpacingPx = timeline.majorTickSpacingPx
@@ -57,7 +63,11 @@ class VideoThumbSliderView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val w = config.contentWidthPx
+        var w = config.contentWidthPx
+        customHorizontalScrollView?.let {
+            w += it.width
+            startBlank = it.width/2
+        }
         val widthSpec = if (w > 0) {
             MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY)
         } else {
@@ -65,6 +75,8 @@ class VideoThumbSliderView @JvmOverloads constructor(
         }
         super.onMeasure(widthSpec, heightMeasureSpec)
     }
+
+    var startBlank = 0
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -78,7 +90,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
         val lastIndex = ((contentScrollX + visibleW) / cellW).toInt() + 1
 
         for (i in firstIndex..min(lastIndex, cellCount - 1)) {
-            val left = i * cellW
+            val left = i * cellW + startBlank
             val cellDuration = min(config.gridIntervalSec, config.durationSec - config.gridCellStartSec(i))
             val right = left + (cellDuration / config.gridIntervalSec * cellW).toFloat()
             val paint = if (i and 1 == 0) cellPaint else cellAltPaint
