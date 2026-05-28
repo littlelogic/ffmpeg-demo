@@ -155,7 +155,7 @@ private:
     std::atomic<double> mAudioSeekPos{kSeekPosUnset}; ///< 音频 Seek 目标位置（秒，decode 线程清零）
 
     // UI 只往此列表追加 seek 时间；ReadPacketLoop 取最新并清空后执行 demuxer seek（合并连击 seek）。
-    std::mutex mWillSeekMutex;
+    mutable std::mutex mWillSeekMutex;
     std::vector<double> mWillSeekPointsList;
 
     std::thread *mReadPacketThread = nullptr;        ///< 读包线程
@@ -200,6 +200,8 @@ private:
      * @return 最新 seek 秒数；列表为空返回 kSeekPosUnset
      */
     double takeLatestSeekPoint();
+
+    bool haveNewSeekPoint() const;
 
     /**
      * @brief 消费 seek 队列（仅 ReadPacketLoop 调用，每轮最多处理一次）

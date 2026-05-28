@@ -399,7 +399,7 @@ void FFMpegPlayer::ReadPacketLoop() {
 }
 
 double FFMpegPlayer::takeLatestSeekPoint() {
-    std::lock_guard<std::mutex> lk(mWillSeekMutex);
+    std::lock_guard<std::mutex> lk222(mWillSeekMutex);
     if (mWillSeekPointsList.empty()) {
         return kSeekPosUnset;
     }
@@ -641,6 +641,15 @@ int FFMpegPlayer::readAvPacketToQueue(bool videoOnly) {
     return ret;
 }
 
+
+bool FFMpegPlayer::haveNewSeekPoint() const {
+    std::lock_guard<std::mutex> lk222(mWillSeekMutex);
+    if (mWillSeekPointsList.empty()) {
+        return false;
+    }
+    return true;
+}
+
 /**
  * @brief 将 AVPacket 推入指定队列
  * @details 如果队列已满，阻塞等待 10ms 直到有空间
@@ -651,6 +660,15 @@ bool FFMpegPlayer::pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVP
     }
 
     while (queue->isFull()) {
+        if (mPlayerState == PlayerState::PAUSE) {
+            if (mPauseVideoPreviewRendered.load()) {
+                {
+                    if (haveNewSeekPoint()) {
+                        return true;
+                    }
+                }
+            }
+        }
         queue->wait(10);
         LOGD("queue is full, wait 10ms, packet index: %d", packet->stream_index)
     }
