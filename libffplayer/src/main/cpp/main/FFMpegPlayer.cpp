@@ -714,7 +714,7 @@ void FFMpegPlayer::VideoDecodeLoop() {
             mPauseVideoPreviewRendered.store(true);
             // 目标帧已上屏，丢弃预取阶段队列里剩余的 packet，避免再闪中间帧
             if (mVideoPacketQueue != nullptr) {
-                mVideoPacketQueue->clear();
+//                mVideoPacketQueue->clear();
             }
         }
 
@@ -733,7 +733,7 @@ void FFMpegPlayer::VideoDecodeLoop() {
 
 //        LOGE("260527seek VideoDecodeLoop 11")
         if (mVideoSeekPos.load() >= 0) {
-            mVideoPacketQueue->clear();
+//            mVideoPacketQueue->clear();
             mVideoDecoder->seek(mVideoSeekPos.load());
             mVideoSeekPos.store(kSeekPosUnset);
             LOGI("clear video queue via seek")
@@ -751,7 +751,7 @@ void FFMpegPlayer::VideoDecodeLoop() {
         if (mPlayerState == PlayerState::PAUSE) {
             if (mPauseVideoPreviewRendered.load()) {
                 if (mVideoPacketQueue != nullptr) {
-                    mVideoPacketQueue->clear();
+//                    mVideoPacketQueue->clear();
                 }
                 continue;
             }
