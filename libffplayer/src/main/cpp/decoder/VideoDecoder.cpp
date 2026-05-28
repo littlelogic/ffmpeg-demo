@@ -273,6 +273,7 @@ bool VideoDecoder::prepare() {
  * @return 成功返回 0，失败或 EOF 返回错误代码
  */
 int VideoDecoder::decode(AVPacket *avPacket) {
+    LOGE("260527seek VideoDecoder decode 01")
     mDropExtraFramesThisDecode = false;
     int64_t start = getCurrentTimeMs();
 
@@ -330,7 +331,6 @@ int VideoDecoder::decode(AVPacket *avPacket) {
 
         // ====== 第五步：处理有效的解码帧 ======
         int64_t receivePoint = getCurrentTimeMs() - start;
-
         int64_t ptsMs = framePtsMs(mAvFrame);
         int64_t normPtsMs = (ptsMs != AV_NOPTS_VALUE) ? (ptsMs - mStreamStartPtsMs) : AV_NOPTS_VALUE;
 
@@ -360,10 +360,11 @@ int VideoDecoder::decode(AVPacket *avPacket) {
             mPrecisionSeekOutputPending = false;
             mDropExtraFramesThisDecode = true;
             mSeekEndTimeMs = getCurrentTimeMs();
-            LOGE("[video] precision seek output frame, normPts=%" PRId64 " consume=%" PRId64 " ms",
-                 normPtsMs, mSeekEndTimeMs - mSeekStartTimeMs)
+            LOGE("[video] precision seek output frame, normPts=%" PRId64 " ptsMs=%" PRId64 " ms  "
+                       "pts=%" PRId64 "pkt_dts=%" PRId64  "best_effort_timestamp=%" PRId64,
+                 normPtsMs, ptsMs,mAvFrame->pts,mAvFrame->pkt_dts,mAvFrame->best_effort_timestamp)
             updateTimestamp(mAvFrame);
-            dispatchFrameToListener(mAvFrame);
+            dispatchFrameToListener(mAvFrame,"precision");
             av_frame_unref(mAvFrame);
             receiveCount++;
             LOGW("[video] decode sendPoint: %" PRId64 ", receivePoint: %" PRId64 ", receiveCount: %d",
@@ -372,7 +373,7 @@ int VideoDecoder::decode(AVPacket *avPacket) {
         }
 
         updateTimestamp(mAvFrame);
-        dispatchFrameToListener(mAvFrame);
+        dispatchFrameToListener(mAvFrame,"normal");
         av_frame_unref(mAvFrame);
         receiveCount++;
 
@@ -537,7 +538,8 @@ void VideoDecoder::onPrecisionSeekFrameDisplayed() {
     mPrecisionSeekTargetNormMs = -1;
 }
 
-void VideoDecoder::cancelPrecisionSeekPending() {
+void VideoDecoder::cancelPrecisionSeekPending(const char *info) {
+    LOGE("260527seek VideoDecoder::cancelPrecisionSeekPending info:%s", info)
     mPrecisionSeekOutputPending = false;
     mPrecisionSeekTargetNormMs = -1;
     mDropExtraFramesThisDecode = false;
@@ -557,7 +559,9 @@ void VideoDecoder::releaseMediacodecFrameIfNeeded(AVFrame *frame) {
  *
  * @param frame 解码得到的视频帧（调用方在回调返回后负责 av_frame_unref）
  */
-void VideoDecoder::dispatchFrameToListener(AVFrame *frame) {
+void VideoDecoder::dispatchFrameToListener(AVFrame *frame, const char *info) {
+    LOGE("260527seek dispatchFrameToListener frame, info=%s pts=%" PRId64 " pkt_dts=%" PRId64  " best_effort_timestamp=%" PRId64,
+         info,mAvFrame->pts,mAvFrame->pkt_dts,mAvFrame->best_effort_timestamp)
     // ====== 第六步：处理像素格式 ======
     // 检查宽高是否为偶数（某些图像处理需要偶数尺寸）
     bool isEvenEdge = isEven(frame->width) && isEven(frame->height);
@@ -664,7 +668,7 @@ bool VideoDecoder::avSync(AVFrame *frame) {
  * @return 成功返回 0，失败返回错误代码
  */
 int VideoDecoder::seek(double pos) {
-    cancelPrecisionSeekPending();
+    cancelPrecisionSeekPending("VideoDecoder::seek");
     // ★ demuxer 的 avformat_seek_file 已由 ReadPacketLoop 统一执行（mFtx 只有一个全局读指针，
     //   音视频解码线程不可各自 seek，否则会互相覆盖位置且对 AVFormatContext 形成数据竞争）。
     //   这里只做"解码器本地"的两件事：

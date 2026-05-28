@@ -428,7 +428,7 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
     mPlayCompletedNotified.store(false);
 
     if (mVideoDecoder != nullptr) {
-        mVideoDecoder->cancelPrecisionSeekPending();
+        mVideoDecoder->cancelPrecisionSeekPending("FFMpegPlayer::applySeekInternal-1");
     }
 
     if (mVideoPacketQueue != nullptr) {
@@ -478,7 +478,7 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
             LOGW("[seek] avformat_seek_file failed, av_seek_frame ret=%d globalTs=%" PRId64,
                  sret, globalTs);
         }
-        LOGI("[seek] demuxer seek done: timeS=%f refStream=%d ts=%" PRId64 " ret=%d",
+        LOGI("260527seek [seek] demuxer seek done: timeS=%f refStream=%d ts=%" PRId64 " ret=%d",
              timeS, refStreamIdx, seekTs, sret)
     } else {
         LOGE("[seek] skip avformat_seek_file: timeS=%f refIdx=%d mFtx=%p",
@@ -500,7 +500,7 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
             mVideoSeekPos.store(kSeekPosUnset);
             mAudioSeekPos.store(kSeekPosUnset);
             if (mVideoDecoder != nullptr) {
-                mVideoDecoder->cancelPrecisionSeekPending();
+                mVideoDecoder->cancelPrecisionSeekPending("FFMpegPlayer::applySeekInternal-2");
             }
             if (mVideoPacketQueue != nullptr) {
                 mVideoPacketQueue->notify();
@@ -532,25 +532,40 @@ void FFMpegPlayer::prefetchPauseVideoFrame() {
     }
     mPauseVideoPreviewRendered.store(false);
 
-    static const int kMaxPackets = 2000;
+    static const int MaxCount = 100;
+    int num = 0;
+    static const int kMaxPackets = 1000;
     int packetsRead = 0;
-    for (; packetsRead < kMaxPackets; packetsRead++) {
-        if (mPlayerState != PlayerState::PAUSE || mHasAbort) {
-            break;
-        }
-        if (mPauseVideoPreviewRendered.load()) {
-            LOGI("[pause-preview] video frame rendered, packets read=%d", packetsRead)
-            break;
-        }
-        if (readAvPacketToQueue(true) != 0) {
-            LOGW("[pause-preview] read end or error at packet %d", packetsRead)
-            break;
+    for (; ; packetsRead++) {
+        if (packetsRead < kMaxPackets) {
+            if (mPlayerState != PlayerState::PAUSE || mHasAbort) {
+                break;
+            }
+            if (mPauseVideoPreviewRendered.load()) {
+                LOGI("[pause-preview] video frame rendered, packets read=%d", packetsRead)
+                break;
+            }
+            if (readAvPacketToQueue(true) != 0) {
+                LOGW("[pause-preview] read end or error at packet %d", packetsRead)
+                break;
+            }
+        } else {
+            /// 亦可以根据时间阈值。来判断是否要跳过后续包，避免死循环。
+            if (mPlayerState == PlayerState::PAUSE) {
+                if (num++ >= MaxCount) {
+                    break;
+                }
+                packetsRead = 0;
+            }
         }
     }
+
+
     if (!mPauseVideoPreviewRendered.load()) {
-        LOGW("[pause-preview] no frame rendered after %d packets, cancel precision gate", packetsRead)
+        LOGW("[pause-preview] num:%d packetsRead:%d, no frame rendered after %d packets, cancel precision gate"
+             , num,packetsRead,packetsRead)
         if (mVideoDecoder != nullptr) {
-            mVideoDecoder->cancelPrecisionSeekPending();
+            mVideoDecoder->cancelPrecisionSeekPending("prefetchPauseVideoFrame");
         }
     }
 }
@@ -716,6 +731,7 @@ void FFMpegPlayer::VideoDecodeLoop() {
             break;
         }
 
+//        LOGE("260527seek VideoDecodeLoop 11")
         if (mVideoSeekPos.load() >= 0) {
             mVideoPacketQueue->clear();
             mVideoDecoder->seek(mVideoSeekPos.load());
@@ -725,11 +741,22 @@ void FFMpegPlayer::VideoDecodeLoop() {
             continue;
         }
 
+//        LOGE("260527seek VideoDecodeLoop 21")
         if (mVideoPacketQueue->isEmpty()) {
             mVideoPacketQueue->wait(10);
             continue;
         }
 
+
+        if (mPlayerState == PlayerState::PAUSE) {
+            if (mPauseVideoPreviewRendered.load()) {
+                if (mVideoPacketQueue != nullptr) {
+                    mVideoPacketQueue->clear();
+                }
+                continue;
+            }
+        }
+        LOGE("260527seek VideoDecodeLoop 31")
         AVPacket *packet = av_packet_alloc();
         if (packet != nullptr) {
             int ret = mVideoPacketQueue->popTo(packet);
@@ -999,7 +1026,7 @@ double FFMpegPlayer::getDuration() {
  *          demuxer seek、清队列、主时钟等在 drainWillSeekPointsList → applySeekInternal 中执行。
  */
 bool FFMpegPlayer::seek(double timeS) {
-    LOGI("enqueue seek: %f, player state: %d", timeS, mPlayerState)
+    LOGI("260527seek enqueue seek: %f, player state: %d", timeS, mPlayerState)
     {
         std::lock_guard<std::mutex> lk(mWillSeekMutex);
         // 高频拖动只保留最新目标，避免列表无限增长。

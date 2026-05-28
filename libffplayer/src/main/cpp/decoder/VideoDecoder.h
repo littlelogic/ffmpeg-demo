@@ -45,7 +45,7 @@ public:
     int64_t getStartTimeMsForSync() const;    ///< 获取,音视频同步起始时间（ms）
     int64_t getTimestamp() const;             ///< 获取当前帧时间戳（ms）
     void onPrecisionSeekFrameDisplayed();     ///< 精确 seek 目标帧已上屏，清除门槛
-    void cancelPrecisionSeekPending();        ///< 放弃精确门槛（预取失败时恢复出画）
+    void cancelPrecisionSeekPending(const char *info);        ///< 放弃精确门槛（预取失败时恢复出画）
     int getRotate();                         ///< 获取视频旋转角度
     AVRational getDisplayAspectRatio();      ///< 获取显示宽高比（DAR）
 
@@ -76,7 +76,7 @@ private:
     bool isBeforePrecisionSeekTarget(int64_t normPtsMs) const;
     void releaseMediacodecFrameIfNeeded(AVFrame *frame);
     /** 第六步：按像素格式直通或转 RGBA 后，回调 mOnFrameArrivedListener */
-    void dispatchFrameToListener(AVFrame *frame);
+    void dispatchFrameToListener(AVFrame *frame, const char *info);
     int swsScale(AVFrame *srcFrame, AVFrame *swFrame); ///< 像素格式转换
 
     double getFps();
