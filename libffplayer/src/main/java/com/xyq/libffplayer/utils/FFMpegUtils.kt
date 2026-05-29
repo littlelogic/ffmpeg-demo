@@ -65,9 +65,38 @@ object FFMpegUtils {
         return nativeExportGif(videoPath, output)
     }
 
+    /**
+     * 提取单帧 RGBA 数据。
+     *
+     * @param path         视频文件路径
+     * @param timestampSec 目标时间戳（秒）
+     * @param width        目标宽度（<=0 自适应）
+     * @param height       目标高度（<=0 自适应）
+     * @param precise      是否精准抽帧
+     * @return             RGBA 字节数组（width × height × 4），失败返回 null
+     */
+    fun getSingleFrame(
+        path: String,
+        timestampSec: Double,
+        width: Int,
+        height: Int,
+        precise: Boolean = false,
+    ): ByteArray? {
+        if (path.isEmpty()) return null
+        return nativeGetSingleFrame(path, timestampSec, width, height, precise)
+    }
+
     private fun allocateFrame(width: Int, height: Int): ByteBuffer {
         return ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.LITTLE_ENDIAN)
     }
+
+    private external fun nativeGetSingleFrame(
+        path: String,
+        timestampSec: Double,
+        width: Int,
+        height: Int,
+        precise: Boolean,
+    ): ByteArray?
 
     private external fun nativeExportGif(videoPath: String, output: String): Boolean
 

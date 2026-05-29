@@ -20,6 +20,7 @@ public class CustomHorizontalScrollView extends MyHorizontalScrollView {
 
     public interface OnTimelineScaleListener {
         void onTimelineScaleChanged(double anchorTimeSec, boolean snapEnd);
+        void onTimelineScaleEnd();
     }
 
     private OnTouchDownEventListener onTouchDownEventListener;
@@ -89,6 +90,9 @@ public class CustomHorizontalScrollView extends MyHorizontalScrollView {
             @Override
             public void onScaleEnd(ScaleGestureDetector detector) {
                 isPinchScaling = false;
+                if (onTimelineScaleListener != null) {
+                    onTimelineScaleListener.onTimelineScaleEnd();
+                }
             }
         });
     }

@@ -45,7 +45,12 @@ import com.xyq.libmediapicker.entity.Media
 import com.xyq.librender.filter.GreyFilter
 import com.xyq.libutils.CommonUtils
 import com.xyq.libutils.FileUtils
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.os.Handler
+import android.os.Looper
 import java.io.File
+import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -73,6 +78,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mPlayViewModel: PlayViewModel
 
     private var mExecutors = Executors.newFixedThreadPool(2)
+
+    /** 缩略图加载专用线程，避免与其他任务竞争导致加载延迟 */
+    private val mSliderExecutor = Executors.newSingleThreadExecutor()
+
+    /** 每次开始新一轮缩略图加载时递增，用于取消旧任务 */
+    private var mSliderLoadVersion = 0
+
+    /** 防抖：缩放停稳后再加载缩略图 */
+    private val mSliderThumbHandler = Handler(Looper.getMainLooper())
 
     private val mLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -248,6 +262,7 @@ class MainActivity : AppCompatActivity() {
         mIsExporting = false
         super.onDestroy()
         mPlayer.release()
+        mSliderExecutor.shutdown()
         mExecutors.shutdown()
     }
 
@@ -315,10 +330,11 @@ class MainActivity : AppCompatActivity() {
                 mTrackUserScrolling = newState != MyHorizontalScrollView.SCROLL_STATE_IDLE
                 when (newState) {
                     MyHorizontalScrollView.SCROLL_STATE_IDLE -> {
-                        // fling 结束 / 用户离手且没启动惯性
+                        // fling 结束 / 用户离手且没启动惯性 → 立即补充缺失缩略图
                         ALog.i("MainActivity-trackScrollView-onScrollStateChanged-SCROLL_STATE_IDLE"
                                     + " fling 结束 / 用户离手且没启动惯性"
                         )
+                        loadMissingVisibleThumbnails()
                     }
                     MyHorizontalScrollView.SCROLL_STATE_DRAGGING -> {
                         // 用户手指正在拖动
@@ -348,6 +364,8 @@ class MainActivity : AppCompatActivity() {
                     )
                     mPlayer.seek(finalTime)
                 }
+                // 滑动过程中防抖补充缺失缩略图
+                scheduleLoadMissingThumbnails()
             }
         })
 
@@ -536,11 +554,20 @@ class MainActivity : AppCompatActivity() {
         mBinding.trackScrollView.setTrackHeaderWidthPx(headerWidthPx)
         mBinding.trackScrollView.setDurationSec(mDuration)
         mBinding.trackScrollView.setScaleEnabled(mIsVideo && mDuration > 0)
-        mBinding.trackScrollView.setOnTimelineScaleListener { _, _ ->
-            applyTimelineConfigToViews()
-            applyTimelineLayout()
-            updateTimelineScrollOffset()
-        }
+        mBinding.trackScrollView.setOnTimelineScaleListener(object :
+            com.xyq.ffmpegdemo.timeline.view.CustomHorizontalScrollView.OnTimelineScaleListener {
+            override fun onTimelineScaleChanged(anchorTimeSec: Double, snapEnd: Boolean) {
+                applyTimelineConfigToViews(duringPinch = true)
+                applyTimelineLayout()
+                updateTimelineScrollOffset()
+            }
+
+            override fun onTimelineScaleEnd() {
+                applyTimelineConfigToViews(duringPinch = false)
+                applyTimelineLayout()
+                updateTimelineScrollOffset()
+            }
+        })
     }
 
     private fun setupTimeline(duration: Double) {
@@ -556,9 +583,22 @@ class MainActivity : AppCompatActivity() {
         updateTimelineScrollOffset()
     }
 
-    private fun applyTimelineConfigToViews() {
+    private fun applyTimelineConfigToViews(duringPinch: Boolean = false) {
         mBinding.timeScaleView.setTimelineConfig(mTimelineConfig)
         mBinding.videoThumbSliderView.setTimelineConfig(mTimelineConfig)
+        ++mSliderLoadVersion
+        mSliderThumbHandler.removeCallbacksAndMessages(null)
+        mScrollThumbHandler.removeCallbacksAndMessages(null)
+
+        if (duringPinch) {
+            // 缩放进行中：150ms 防抖，仅加载可见区域（不清空旧缩略图，旧图做占位）
+            mSliderThumbHandler.postDelayed({
+                loadSliderThumbnailsVisible(playPath)
+            }, 150L)
+        } else {
+            // 缩放结束 / 非缩放场景：立即全量加载，优先可见区域
+            mSliderThumbHandler.post { loadSliderThumbnailsPrioritized(playPath) }
+        }
     }
 
     private fun applyTimelineLayout() {
@@ -627,6 +667,243 @@ class MainActivity : AppCompatActivity() {
     private fun scrollTrackToTimeSec(timeSec: Double) {
         mBinding.trackScrollView.scrollToTimeSec(timeSec)
         updateTimelineScrollOffset()
+    }
+
+    /** 滑动过程中防抖 200ms，避免频繁提交加载任务 */
+    private val mScrollThumbHandler = Handler(Looper.getMainLooper())
+
+    private fun scheduleLoadMissingThumbnails() {
+        loadMissingVisibleThumbnails()
+    }
+
+    /**
+     * 补充加载当前可见区域中缺失的缩略图（滑动场景使用）。
+     * 不影响全量加载的版本号，仅追加缺失的 cell。
+     */
+    private fun loadMissingVisibleThumbnails() {
+        if (playPath.isEmpty() || mDuration <= 0) return
+        if (mBinding.trackScrollView.isPinchScaling) return
+
+        val missingCells = mBinding.videoThumbSliderView.getMissingVisibleCells()
+        if (missingCells.isEmpty()) return
+
+        val thumbH = mBinding.videoThumbSliderView.height.coerceAtLeast(80)
+        val thumbW = mTimelineConfig.gridCellWidthPx.toInt().coerceAtLeast(80)
+        val sampleTimes = DoubleArray(missingCells.size) { i ->
+            mBinding.videoThumbSliderView.cellSampleTimeSec(missingCells[i])
+        }
+
+        val version = mSliderLoadVersion
+
+        mSliderExecutor.submit {
+            FFMpegUtils.getVideoFrames(playPath, thumbW, thumbH, false,
+                object : FFMpegUtils.VideoFrameArrivedInterface {
+                    override fun onFetchStart(duration: Double): DoubleArray = sampleTimes
+
+                    override fun onProgress(
+                        frame: ByteBuffer, timestamps: Double,
+                        width: Int, height: Int, rotate: Int, index: Int
+                    ): Boolean {
+                        if (version != mSliderLoadVersion) return false
+                        if (index >= missingCells.size) return true
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        bitmap.copyPixelsFromBuffer(frame)
+                        val finalBitmap = if (rotate != 0) {
+                            val matrix = Matrix()
+                            matrix.postRotate(rotate.toFloat())
+                            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                        } else bitmap
+                        val cellIndex = missingCells[index]
+                        runOnUiThread {
+                            if (version == mSliderLoadVersion) {
+                                mBinding.videoThumbSliderView.setThumbnail(cellIndex, finalBitmap)
+                            }
+                        }
+                        return true
+                    }
+
+                    override fun onFetchEnd() {}
+                }
+            )
+        }
+    }
+
+    /**
+     * 仅加载当前可见区域的缩略图（缩放进行中使用，快速给出实时反馈）。
+     */
+    private fun loadSliderThumbnailsVisible(path: String) {
+        val version = ++mSliderLoadVersion
+
+        if (path.isEmpty()) return
+        val visibleRange = mBinding.videoThumbSliderView.getVisibleCellRange()
+        if (visibleRange.isEmpty()) return
+
+        val loadIndices = visibleRange.toList()
+        if (loadIndices.isEmpty()) return
+
+        val thumbH = mBinding.videoThumbSliderView.height.coerceAtLeast(80)
+        val thumbW = mTimelineConfig.gridCellWidthPx.toInt().coerceAtLeast(80)
+        val sampleTimes = DoubleArray(loadIndices.size) { i ->
+            mBinding.videoThumbSliderView.cellSampleTimeSec(loadIndices[i])
+        }
+
+        mSliderExecutor.submit {
+            FFMpegUtils.getVideoFrames(path, thumbW, thumbH, false,
+                object : FFMpegUtils.VideoFrameArrivedInterface {
+                    override fun onFetchStart(duration: Double): DoubleArray = sampleTimes
+
+                    override fun onProgress(
+                        frame: ByteBuffer, timestamps: Double,
+                        width: Int, height: Int, rotate: Int, index: Int
+                    ): Boolean {
+                        if (version != mSliderLoadVersion) return false
+                        if (index >= loadIndices.size) return true
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        bitmap.copyPixelsFromBuffer(frame)
+                        val finalBitmap = if (rotate != 0) {
+                            val matrix = Matrix()
+                            matrix.postRotate(rotate.toFloat())
+                            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                        } else bitmap
+                        val cellIndex = loadIndices[index]
+                        runOnUiThread {
+                            if (version == mSliderLoadVersion) {
+                                mBinding.videoThumbSliderView.setThumbnail(cellIndex, finalBitmap)
+                            }
+                        }
+                        return true
+                    }
+
+                    override fun onFetchEnd() {}
+                }
+            )
+        }
+    }
+
+    /**
+     * 全量加载缩略图，优先加载可见区域，然后加载剩余区域。
+     * 先清空旧缩略图，再依次填充，保证用户最快看到当前视口的正确帧。
+     */
+    private fun loadSliderThumbnailsPrioritized(path: String) {
+        val version = ++mSliderLoadVersion
+
+        if (path.isEmpty()) return
+        val cellCount = mBinding.videoThumbSliderView.cellCount
+        if (cellCount <= 0) return
+
+        // 可见区域优先
+        val visibleRange = mBinding.videoThumbSliderView.getVisibleCellRange()
+        val visibleIndices = if (!visibleRange.isEmpty()) visibleRange.toList() else emptyList()
+
+        // 剩余 cell（不在可见区域内的），采样加载
+        val maxLoad = 80
+        val remainingAll = (0 until cellCount).filter { it !in visibleRange }
+        val step = maxOf(1, (remainingAll.size + (maxLoad - visibleIndices.size).coerceAtLeast(1) - 1) / (maxLoad - visibleIndices.size).coerceAtLeast(1))
+        val remainingIndices = if (remainingAll.isNotEmpty() && step > 0) {
+            (remainingAll.indices step step).map { remainingAll[it] }
+        } else emptyList()
+
+        // 合并：可见区域在前，其余在后
+        val loadIndices = visibleIndices + remainingIndices
+        if (loadIndices.isEmpty()) return
+
+        val thumbH = mBinding.videoThumbSliderView.height.coerceAtLeast(80)
+        val thumbW = mTimelineConfig.gridCellWidthPx.toInt().coerceAtLeast(80)
+        val sampleTimes = DoubleArray(loadIndices.size) { i ->
+            mBinding.videoThumbSliderView.cellSampleTimeSec(loadIndices[i])
+        }
+
+        // 清空旧缩略图，准备接收新的
+        mBinding.videoThumbSliderView.clearThumbnails()
+
+        mSliderExecutor.submit {
+            FFMpegUtils.getVideoFrames(path, thumbW, thumbH, false,
+                object : FFMpegUtils.VideoFrameArrivedInterface {
+                    override fun onFetchStart(duration: Double): DoubleArray = sampleTimes
+
+                    override fun onProgress(
+                        frame: ByteBuffer, timestamps: Double,
+                        width: Int, height: Int, rotate: Int, index: Int
+                    ): Boolean {
+                        if (version != mSliderLoadVersion) return false
+                        if (index >= loadIndices.size) return true
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        bitmap.copyPixelsFromBuffer(frame)
+                        val finalBitmap = if (rotate != 0) {
+                            val matrix = Matrix()
+                            matrix.postRotate(rotate.toFloat())
+                            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                        } else bitmap
+                        val cellIndex = loadIndices[index]
+                        runOnUiThread {
+                            if (version == mSliderLoadVersion) {
+                                mBinding.videoThumbSliderView.setThumbnail(cellIndex, finalBitmap)
+                            }
+                        }
+                        return true
+                    }
+
+                    override fun onFetchEnd() {}
+                }
+            )
+        }
+    }
+
+    /**
+     * 为 VideoThumbSliderView 异步加载缩略图。
+     * 复用 getVideoFrames 批量抽帧（单 reader），按 cell 采样时间戳顺序提取。
+     * 每次调用递增版本号，旧任务在 onProgress 返回 false 时自动中止。
+     */
+    private fun loadSliderThumbnails(path: String) {
+        val version = ++mSliderLoadVersion
+
+        if (path.isEmpty()) return
+        val cellCount = mBinding.videoThumbSliderView.cellCount
+        if (cellCount <= 0) return
+
+        // 最多加载 80 格，防止视频过长或放大过多时任务太重
+        val maxLoad = 80
+        val step = maxOf(1, (cellCount + maxLoad - 1) / maxLoad)
+        val loadIndices = (0 until cellCount step step).toList()
+        if (loadIndices.isEmpty()) return
+
+        val thumbH = mBinding.videoThumbSliderView.height.coerceAtLeast(80)
+        val thumbW = mTimelineConfig.gridCellWidthPx.toInt().coerceAtLeast(80)
+        val sampleTimes = DoubleArray(loadIndices.size) { i ->
+            mBinding.videoThumbSliderView.cellSampleTimeSec(loadIndices[i])
+        }
+
+        mSliderExecutor.submit {
+            FFMpegUtils.getVideoFrames(path, thumbW, thumbH, false,
+                object : FFMpegUtils.VideoFrameArrivedInterface {
+                    override fun onFetchStart(duration: Double): DoubleArray = sampleTimes
+
+                    override fun onProgress(
+                        frame: ByteBuffer, timestamps: Double,
+                        width: Int, height: Int, rotate: Int, index: Int
+                    ): Boolean {
+                        if (version != mSliderLoadVersion) return false
+                        if (index >= loadIndices.size) return true
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        bitmap.copyPixelsFromBuffer(frame)
+                        val finalBitmap = if (rotate != 0) {
+                            val matrix = Matrix()
+                            matrix.postRotate(rotate.toFloat())
+                            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                        } else bitmap
+                        val cellIndex = loadIndices[index]
+                        runOnUiThread {
+                            if (version == mSliderLoadVersion) {
+                                mBinding.videoThumbSliderView.setThumbnail(cellIndex, finalBitmap)
+                            }
+                        }
+                        return true
+                    }
+
+                    override fun onFetchEnd() {}
+                }
+            )
+        }
     }
 
     private fun fetchVideoThumbnail(path: String) {

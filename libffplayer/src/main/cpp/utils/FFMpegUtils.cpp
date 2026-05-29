@@ -125,6 +125,75 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeProbeMediaInfo(JNIEnv *env, job
 }
 
 /**
+ * @brief 提取单帧 RGBA 数据
+ * @details 在指定时间戳（秒）处抽取一帧，缩放到目标尺寸后写入字节数组返回。
+ *          width/height 至少有一个 > 0，若两者均 <=0 则使用原始分辨率。
+ *
+ * @param path        视频文件路径
+ * @param timestampSec 目标时间（秒，浮点，内部取整到秒边界）
+ * @param width       目标宽度（<=0 自适应）
+ * @param height      目标高度（<=0 自适应）
+ * @param precise     是否精准抽帧
+ * @return            RGBA 字节数组（width × height × 4 字节），失败返回 null
+ */
+extern "C"
+JNIEXPORT jbyteArray JNICALL
+Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeGetSingleFrame(JNIEnv *env, jobject thiz,
+                                                                jstring path, jdouble timestampSec,
+                                                                jint width, jint height,
+                                                                jboolean precise) {
+    ScopedUtfChars scopedPath(env, path);
+    std::string s_path = scopedPath.c_str();
+
+    auto *reader = new FFVideoReader();
+    reader->setDiscardType(DISCARD_NONREF);
+    if (!reader->init(s_path)) {
+        delete reader;
+        return nullptr;
+    }
+
+    int videoWidth = reader->getMediaInfo().width;
+    int videoHeight = reader->getMediaInfo().height;
+    if (videoWidth <= 0 || videoHeight <= 0) {
+        reader->release();
+        delete reader;
+        return nullptr;
+    }
+
+    if (width <= 0 && height <= 0) {
+        width = videoWidth;
+        height = videoHeight;
+    } else if (width > 0 && height <= 0) {
+        width += width % 2;
+        if (width > videoWidth) width = videoWidth;
+        height = (jint)(1.0 * width * videoHeight / videoWidth);
+        height += height % 2;
+    } else if (width <= 0) {
+        height += height % 2;
+        if (height > videoHeight) height = videoHeight;
+        width = (jint)(1.0 * height * videoWidth / videoHeight);
+        width += width % 2;
+    }
+
+    int byteCount = width * height * 4;
+    jbyteArray result = env->NewByteArray(byteCount);
+    if (result == nullptr) {
+        reader->release();
+        delete reader;
+        return nullptr;
+    }
+
+    jbyte *buffer = env->GetByteArrayElements(result, nullptr);
+    memset(buffer, 0, byteCount);
+    reader->getFrame((int64_t) timestampSec, width, height, (uint8_t *) buffer, (bool) precise);
+    env->ReleaseByteArrayElements(result, buffer, 0);
+
+    reader->release();
+    delete reader;
+    return result;
+}
+
+/**
  * @brief 导出 GIF 动画
  * @details 工作流程：
  *   1. 初始化 FFVideoReader（设置丢帧策略 DISCARD_NONKEY，只读关键帧）
