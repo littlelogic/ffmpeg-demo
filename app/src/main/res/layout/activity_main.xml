@@ -79,13 +79,13 @@
             android:text="@string/default_duration_desc"
             android:textColor="@color/white"
             android:layout_marginBottom="16dp"
-            app:layout_constraintBottom_toTopOf="@+id/video_thumbnails"
+            app:layout_constraintBottom_toTopOf="@+id/videoThumbnails"
             app:layout_constraintLeft_toLeftOf="parent"
             app:layout_constraintRight_toRightOf="parent"
             />
 
         <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/video_thumbnails"
+            android:id="@+id/videoThumbnails"
             android:orientation="horizontal"
             android:layout_width="match_parent"
             android:layout_height="60dp"
