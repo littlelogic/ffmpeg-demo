@@ -1,5 +1,6 @@
 package com.xyq.libffplayer.utils
 
+import android.graphics.Bitmap
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -83,6 +84,21 @@ object FFMpegUtils {
     fun getSingleFrame(ptr: Long, timestampSec: Double, precise: Boolean = true): ByteBuffer? {
         if (ptr == 0L) return null
         return nativeGetSingleFrame(ptr, timestampSec, precise)
+    }
+
+    fun getSingleFrame(
+        ptr: Long,
+        width : Int,
+        height : Int,
+        timestampSec: Double,
+        precise: Boolean,
+    ): Bitmap?{
+        val buffer = getSingleFrame(ptr, timestampSec, precise) ?: return null
+        buffer.rewind()
+        // 这里假设输出格式为 RGBA8888，根据实际情况调整
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            copyPixelsFromBuffer(buffer)
+        }
     }
 
     private external fun nativeGetSingleFrame(
