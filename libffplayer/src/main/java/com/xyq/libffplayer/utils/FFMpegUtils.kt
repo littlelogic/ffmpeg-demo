@@ -69,6 +69,16 @@ object FFMpegUtils {
         return ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.LITTLE_ENDIAN)
     }
 
+
+    private external fun nativeGetSingleFrame(
+        path: String,
+        timestampSec: Double,
+        width: Int,
+        height: Int,
+        precise: Boolean,
+    ): ByteArray?
+
+
     private external fun nativeExportGif(videoPath: String, output: String): Boolean
 
 }

@@ -19,6 +19,21 @@ extern "C" {
 #include "libavutil/display.h"
 }
 
+namespace {
+
+/** 精准抽帧：当前帧是否达到目标时间（流 time_base 下的 pts） */
+bool frameMatchesSeekTarget(const AVFrame *frame, int64_t targetPts, bool precise) {
+    if (!precise) {
+        return true;
+    }
+    if (frame->pts == AV_NOPTS_VALUE) {
+        return false;
+    }
+    return frame->pts >= targetPts;
+}
+
+}  // namespace
+
 FFVideoReader::FFVideoReader() {
     LOGI("FFVideoReader")
 }
@@ -78,36 +93,56 @@ void FFVideoReader::getFrame(int64_t pts, int width, int height, uint8_t *buffer
 
     int64_t target = av_rescale_q(pts * AV_TIME_BASE, AV_TIME_BASE_Q, mediaInfo.video_time_base);
     bool find = false;
+    bool inputExhausted = false;
     int decodeCount = 0;
-    while (true) {
+
+    // send/receive 异步：先 drain receive，再 send；一个 packet 可能对应多帧。
+    while (!find && !inputExhausted) {
+        for (;;) {
+            int receiveRes = avcodec_receive_frame(codecContext, frame);
+            if (receiveRes == 0) {
+                decodeCount++;
+                LOGD("[FFVideoReader], receive ok, pts=%" PRId64 " target=%" PRId64 " precise=%d",
+                     frame->pts, target, precise)
+                if (frameMatchesSeekTarget(frame, target, precise)) {
+                    find = true;
+                    break;
+                }
+                av_frame_unref(frame);
+                continue;
+            }
+            if (receiveRes == AVERROR(EAGAIN)) {
+                break;
+            }
+            if (receiveRes == AVERROR_EOF) {
+                inputExhausted = true;
+                break;
+            }
+            LOGE("[FFVideoReader], avcodec_receive_frame failed: %d", receiveRes)
+            inputExhausted = true;
+            break;
+        }
+        if (find || inputExhausted) {
+            break;
+        }
+
         int ret = fetchAvPacket(pkt);
         if (ret < 0) {
             LOGE("[FFVideoReader], fetchAvPacket failed: %d", ret)
+            inputExhausted = true;
             break;
         }
 
         int sendRes = avcodec_send_packet(codecContext, pkt);
-        int receiveRes = avcodec_receive_frame(codecContext, frame);
-        decodeCount++;
-        LOGD("[FFVideoReader], receiveRes: %d, sendRes: %d", receiveRes, sendRes)
-        if (receiveRes == AVERROR(EAGAIN)) {
+        av_packet_unref(pkt);
+        if (sendRes == AVERROR(EAGAIN)) {
             continue;
         }
-
-        // 非精准抽帧
-        if (!precise) {
-            find = true;
+        if (sendRes < 0 && sendRes != AVERROR_EOF) {
+            LOGE("[FFVideoReader], avcodec_send_packet failed: %d", sendRes)
+            inputExhausted = true;
             break;
         }
-
-        // 精准抽帧
-        if (frame->pts >= target) {
-            find = true;
-            break;
-        }
-
-        av_packet_unref(pkt);
-        av_frame_unref(frame);
     }
 
     if (find) {
@@ -209,35 +244,62 @@ void FFVideoReader::getNextFrame(const std::function<void(AVFrame *)>& frameArri
     if (mAvFrame == nullptr) {
         mAvFrame = av_frame_alloc();
     }
+    AVCodecContext *codecContext = getCodecContext();
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = nullptr;
-    while (true) {
-        int ret = fetchAvPacket(pkt);
-        if (ret < 0) {
-            LOGE("[FFVideoReader], getNextFrame fetchAvPacket failed: %d", ret)
+    bool inputExhausted = false;
+
+    while (!frame && !inputExhausted) {
+        for (;;) {
+            int receiveRes = avcodec_receive_frame(codecContext, mAvFrame);
+            if (receiveRes == 0) {
+                frame = mAvFrame;
+                LOGD("[FFVideoReader], getNextFrame receive ok, pts=%" PRId64, mAvFrame->pts)
+                break;
+            }
+            if (receiveRes == AVERROR(EAGAIN)) {
+                break;
+            }
+            if (receiveRes == AVERROR_EOF) {
+                inputExhausted = true;
+                break;
+            }
+            LOGE("[FFVideoReader], getNextFrame receive failed: %d", receiveRes)
+            inputExhausted = true;
+            break;
+        }
+        if (frame || inputExhausted) {
             break;
         }
 
-        int sendRes = avcodec_send_packet(getCodecContext(), pkt);
-        int receiveRes = avcodec_receive_frame(getCodecContext(), mAvFrame);
-        LOGD("[FFVideoReader], getNextFrame receiveRes: %d, sendRes: %d, isKeyFrame: %d", receiveRes, sendRes, isKeyFrame(pkt))
-        av_packet_unref(pkt);
+        int ret = fetchAvPacket(pkt);
+        if (ret < 0) {
+            LOGE("[FFVideoReader], getNextFrame fetchAvPacket failed: %d", ret)
+            inputExhausted = true;
+            break;
+        }
 
-        if (receiveRes == AVERROR(EAGAIN)) {
+        int sendRes = avcodec_send_packet(codecContext, pkt);
+        LOGD("[FFVideoReader], getNextFrame sendRes: %d, isKeyFrame: %d", sendRes, isKeyFrame(pkt))
+        av_packet_unref(pkt);
+        if (sendRes == AVERROR(EAGAIN)) {
             continue;
         }
-
-        if (receiveRes == 0) {
-            frame = mAvFrame;
+        if (sendRes < 0 && sendRes != AVERROR_EOF) {
+            LOGE("[FFVideoReader], getNextFrame send failed: %d", sendRes)
+            inputExhausted = true;
+            break;
         }
-        break;
     }
+
     av_packet_free(&pkt);
 
     if (frameArrivedCallback) {
         frameArrivedCallback(frame);
     }
-    av_frame_unref(mAvFrame);
+    if (frame != nullptr) {
+        av_frame_unref(mAvFrame);
+    }
 }
 
 int FFVideoReader::getRotate(AVStream *stream) {
