@@ -99,7 +99,7 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_getVideoFramesCore(JNIEnv *env, jobje
         auto *buffer = (uint8_t *)env->GetDirectBufferAddress(jByteBuffer);
         /// 在这块已有内存上清零，不分配内存。
         memset(buffer, 0, width * height * 4);
-        reader->getFrame((int64_t)tsArr[i], width, height, buffer, precise);
+        reader->getFrame((double) tsArr[i], width, height, buffer, precise);
         jboolean abort = !env->CallBooleanMethod(cb, onProgress, jByteBuffer, (jdouble)tsArr[i], width, height, rotate, i);
         if (abort) {
             LOGE("onProgress abort")
@@ -301,6 +301,6 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeGetSingleFrame(JNIEnv *env, job
     }
 
     memset(buffer, 0, byteCount);
-    reader->getFrame((int64_t) timestamp_sec, width, height, buffer, (bool) precise);
+    reader->getFrame((double) timestamp_sec, width, height, buffer, (bool) precise);
     return jByteBuffer;
 }

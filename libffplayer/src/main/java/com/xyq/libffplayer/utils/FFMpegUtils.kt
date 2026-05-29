@@ -77,6 +77,7 @@ object FFMpegUtils {
 
     /**
      * 从已 [nativeInitVideoReader] 的实例抽取单帧，像素写入 DirectByteBuffer（与 [getVideoFrames] 相同）。
+     * @param timestampSec 媒体时间，单位：秒，支持小数（如 1.5 表示 1.5 秒处）
      * 输出尺寸由 [nativeVideoReaderSetSize] 决定；未设置时使用原视频宽高。
      */
     fun getSingleFrame(ptr: Long, timestampSec: Double, precise: Boolean = true): ByteBuffer? {
