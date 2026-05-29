@@ -74,14 +74,21 @@ object FFMpegUtils {
     external fun nativeInitVideoReader(path: String): Long
     external fun nativeVideoReaderSetSize(ptr: Long,width: Int, height: Int)
     external fun nativeCloseVideoReader(ptr: Long)
+
+    /**
+     * 从已 [nativeInitVideoReader] 的实例抽取单帧，像素写入 DirectByteBuffer（与 [getVideoFrames] 相同）。
+     * 输出尺寸由 [nativeVideoReaderSetSize] 决定；未设置时使用原视频宽高。
+     */
+    fun getSingleFrame(ptr: Long, timestampSec: Double, precise: Boolean = true): ByteBuffer? {
+        if (ptr == 0L) return null
+        return nativeGetSingleFrame(ptr, timestampSec, precise)
+    }
+
     private external fun nativeGetSingleFrame(
         ptr: Long,
-//        path: String,
         timestampSec: Double,
-//        width: Int,
-//        height: Int,
         precise: Boolean,
-    ): ByteArray?
+    ): ByteBuffer?
 
 
     private external fun nativeExportGif(videoPath: String, output: String): Boolean

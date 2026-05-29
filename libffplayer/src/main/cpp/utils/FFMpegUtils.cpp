@@ -11,6 +11,7 @@
  */
 
 #include <jni.h>
+#include <inttypes.h>
 #include <memory.h>
 #include <string>
 #include "../reader/FFVideoReader.h"
@@ -205,6 +206,7 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeInitVideoReader(JNIEnv *env, jo
         return reinterpret_cast<jlong>(nullptr);
     }
 
+    reader->setSize(videoWidth, videoHeight);
     return reinterpret_cast<jlong>(reader);
 }
 
@@ -252,31 +254,53 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeCloseVideoReader(JNIEnv *env, j
 }
 
 extern "C"
-JNIEXPORT jbyteArray JNICALL
+JNIEXPORT jobject JNICALL
 Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeGetSingleFrame(JNIEnv *env, jobject thiz,
                                                                 jlong ptr, jdouble timestamp_sec,
                                                                 jboolean precise) {
     if (ptr == 0) {
-        // 可选：抛出 Java 异常
-        /*jclass clazz = env->FindClass("java/lang/IllegalStateException");
-        env->ThrowNew(clazz, "Native instance is null");*/
         return nullptr;
     }
 
     auto *reader = reinterpret_cast<FFVideoReader*>(ptr);
-    int width = reader->getMediaInfo().width;
-    int height = reader->getMediaInfo().height;
-
-    int byteCount = width * height * 4;
-    jbyteArray result = env->NewByteArray(byteCount);
-    if (result == nullptr) {
+    int width = reader->getTargetWidth();
+    int height = reader->getTargetHeight();
+    if (width <= 0 || height <= 0) {
+        width = reader->getMediaInfo().width;
+        height = reader->getMediaInfo().height;
+    }
+    if (width <= 0 || height <= 0) {
         return nullptr;
     }
 
-    jbyte *buffer = env->GetByteArrayElements(result, nullptr);
-    memset(buffer, 0, byteCount);
-    reader->getFrame((int64_t) (timestamp_sec * 1000), width, height, (uint8_t *) buffer, (bool) precise);
-    env->ReleaseByteArrayElements(result, buffer, 0);
+    jclass jclazz = env->GetObjectClass(thiz);
+    if (jclazz == nullptr) {
+        return nullptr;
+    }
+    jmethodID allocateFrame = env->GetMethodID(jclazz, "allocateFrame",
+                                               "(II)Ljava/nio/ByteBuffer;");
+    if (allocateFrame == nullptr) {
+        return nullptr;
+    }
 
-    return result;
+    jobject jByteBuffer = env->CallObjectMethod(thiz, allocateFrame, width, height);
+    if (jByteBuffer == nullptr) {
+        return nullptr;
+    }
+
+    auto *buffer = (uint8_t *) env->GetDirectBufferAddress(jByteBuffer);
+    if (buffer == nullptr) {
+        return nullptr;
+    }
+    jlong capacity = env->GetDirectBufferCapacity(jByteBuffer);
+    int byteCount = width * height * 4;
+    if (capacity < byteCount) {
+        LOGE("[nativeGetSingleFrame] direct buffer too small: capacity=%" PRId64 " need=%d",
+             (int64_t) capacity, byteCount)
+        return nullptr;
+    }
+
+    memset(buffer, 0, byteCount);
+    reader->getFrame((int64_t) timestamp_sec, width, height, buffer, (bool) precise);
+    return jByteBuffer;
 }

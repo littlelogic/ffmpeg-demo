@@ -35,6 +35,8 @@ public:
     void getNextFrame(const std::function<void(AVFrame *)>& frameArrivedCallback);
 
     void setSize(int width, int height);
+    int getTargetWidth() const { return mTargetWidth; }
+    int getTargetHeight() const { return mTargetHeight; }
 
 private:
     bool mInit = false;
