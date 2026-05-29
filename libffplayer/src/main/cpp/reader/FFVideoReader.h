@@ -22,6 +22,8 @@ public:
     FFVideoReader();
     ~FFVideoReader();
 
+
+
     bool init(std::string &path) override;
 
     static int getRotate(AVStream *stream);
@@ -31,6 +33,8 @@ public:
     void getFrame(int64_t pts, int width, int height, uint8_t *buffer, bool precise = true);
 
     void getNextFrame(const std::function<void(AVFrame *)>& frameArrivedCallback);
+
+    void setSize(int width, int height);
 
 private:
     bool mInit = false;
@@ -43,6 +47,9 @@ private:
     int64_t mScaleBufferSize = -1;
 
     AVFrame *mAvFrame = nullptr;
+
+    int mTargetWidth = 10;
+    int mTargetHeight = 10;
 };
 
 

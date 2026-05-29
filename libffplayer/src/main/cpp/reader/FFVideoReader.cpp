@@ -335,3 +335,8 @@ int FFVideoReader::getRotate(AVStream *stream) {
 int FFVideoReader::getRotate() {
     return getRotate(mFtx->streams[mMediaInfo.videoIndex]);
 }
+
+void FFVideoReader::setSize(int width, int height) {
+    mTargetWidth = width;
+    mTargetHeight = height;
+}

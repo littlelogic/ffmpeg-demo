@@ -70,11 +70,16 @@ object FFMpegUtils {
     }
 
 
+    // Native方法声明
+    external fun nativeInitVideoReader(path: String): Long
+    external fun nativeVideoReaderSetSize(ptr: Long,width: Int, height: Int)
+    external fun nativeCloseVideoReader(ptr: Long)
     private external fun nativeGetSingleFrame(
-        path: String,
+        ptr: Long,
+//        path: String,
         timestampSec: Double,
-        width: Int,
-        height: Int,
+//        width: Int,
+//        height: Int,
         precise: Boolean,
     ): ByteArray?
 

@@ -182,3 +182,101 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeExportGif(JNIEnv *env, jobject 
 
     return true;
 }
+
+extern "C"
+JNIEXPORT jlong JNICALL
+Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeInitVideoReader(JNIEnv *env, jobject thiz,
+                                                                 jstring path) {
+    auto *reader = new FFVideoReader();
+    reader->setDiscardType(DISCARD_NONREF);
+    ScopedUtfChars scopedPath(env, path);
+    std::string s_path = scopedPath.c_str();
+    if (!reader->init(s_path)) {
+        reader->release();
+        delete reader;
+        return reinterpret_cast<jlong>(nullptr);
+    }
+
+    int videoWidth = reader->getMediaInfo().width;
+    int videoHeight = reader->getMediaInfo().height;
+    if (videoWidth <= 0 || videoHeight <= 0) {
+        reader->release();
+        delete reader;
+        return reinterpret_cast<jlong>(nullptr);
+    }
+
+    return reinterpret_cast<jlong>(reader);
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeVideoReaderSetSize(JNIEnv *env, jobject thiz,
+                                                                    jlong ptr, jint width,
+                                                                    jint height) {
+    if (ptr == 0) {
+        // 可选：抛出 Java 异常
+        /*jclass clazz = env->FindClass("java/lang/IllegalStateException");
+        env->ThrowNew(clazz, "Native instance is null");*/
+        return;
+    }
+    auto *reader = reinterpret_cast<FFVideoReader*>(ptr);
+    int videoWidth = reader->getMediaInfo().width;
+    int videoHeight = reader->getMediaInfo().height;
+    if (width <= 0 && height <= 0) {
+        width = videoWidth;
+        height = videoHeight;
+    } else if (width > 0 && height <= 0) { // scale base width
+        width += width % 2;
+        if (width > videoWidth) {
+            width = videoWidth;
+        }
+        height = (jint)(1.0 * width * videoHeight / videoWidth);
+        height += height % 2;
+    } else if (width <= 0) { // scale base height
+        height += height % 2;
+        if (height > videoHeight) {
+            height = videoHeight;
+        }
+        width = (jint)(1.0 * height * videoWidth / videoHeight);
+    }
+    reader->setSize(width,height);
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeCloseVideoReader(JNIEnv *env, jobject thiz,
+                                                                  jlong ptr) {
+    auto *reader = reinterpret_cast<FFVideoReader*>(ptr);
+    reader->release();
+    delete reader;
+}
+
+extern "C"
+JNIEXPORT jbyteArray JNICALL
+Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeGetSingleFrame(JNIEnv *env, jobject thiz,
+                                                                jlong ptr, jdouble timestamp_sec,
+                                                                jboolean precise) {
+    if (ptr == 0) {
+        // 可选：抛出 Java 异常
+        /*jclass clazz = env->FindClass("java/lang/IllegalStateException");
+        env->ThrowNew(clazz, "Native instance is null");*/
+        return nullptr;
+    }
+
+    auto *reader = reinterpret_cast<FFVideoReader*>(ptr);
+    int width = reader->getMediaInfo().width;
+    int height = reader->getMediaInfo().height;
+
+    int byteCount = width * height * 4;
+    jbyteArray result = env->NewByteArray(byteCount);
+    if (result == nullptr) {
+        return nullptr;
+    }
+
+    jbyte *buffer = env->GetByteArrayElements(result, nullptr);
+    memset(buffer, 0, byteCount);
+    reader->getFrame((int64_t) (timestamp_sec * 1000), width, height, (uint8_t *) buffer, (bool) precise);
+    env->ReleaseByteArrayElements(result, buffer, 0);
+
+    return result;
+}
