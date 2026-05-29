@@ -13,6 +13,31 @@
 #include "FFReader.h"
 #include "header/Logger.h"
 
+int64_t FFReader::streamSeekTargetTs(AVFormatContext *ftx, int streamIdx, double timeSec) {
+    if (timeSec < 0.0) {
+        timeSec = 0.0;
+    }
+    AVStream *st = ftx->streams[streamIdx];
+    int64_t seekTs = av_rescale_q((int64_t) (timeSec * AV_TIME_BASE), AV_TIME_BASE_Q, st->time_base);
+    if (st->start_time != AV_NOPTS_VALUE) {
+        seekTs += st->start_time;
+    }
+    return seekTs;
+}
+
+int64_t FFReader::buildDemuxerSeekTimestamp(AVFormatContext *ftx, int streamIdx, double timeSec) {
+    int64_t seekTs = streamSeekTargetTs(ftx, streamIdx, timeSec);
+    AVStream *st = ftx->streams[streamIdx];
+    const AVIndexEntry *entry = avformat_index_get_entry_from_timestamp(
+            st, seekTs, AVSEEK_FLAG_BACKWARD);
+    if (entry != nullptr && entry->timestamp != AV_NOPTS_VALUE) {
+        LOGI("[FFReader] index keyframe ts=%" PRId64 " (wanted=%" PRId64 ")",
+             entry->timestamp, seekTs);
+        seekTs = entry->timestamp;
+    }
+    return seekTs;
+}
+
 FFReader::FFReader() {
     LOGI("FFReader")
 }
@@ -157,8 +182,8 @@ AVCodecParameters *FFReader::getCodecParameters() {
     return mFtx->streams[mCurStreamIndex]->codecpar;
 }
 
-int FFReader::getKeyFrameIndex(int64_t timestamp) {
-    int64_t target = av_rescale_q((int64_t)(timestamp * AV_TIME_BASE), AV_TIME_BASE_Q, mFtx->streams[mCurStreamIndex]->time_base);
+int FFReader::getKeyFrameIndex(double timestampSec) {
+    int64_t target = streamSeekTargetTs(mFtx, mCurStreamIndex, timestampSec);
     int index = av_index_search_timestamp(
             mFtx->streams[mCurStreamIndex], target, AVSEEK_FLAG_BACKWARD);
     index = FFMAX(index, 0);
@@ -170,16 +195,23 @@ void FFReader::flush() {
     avcodec_flush_buffers(mCodecContextArr[mCurTrackType]);
 }
 
-void FFReader::seek(int64_t timestamp) {
-    AVRational time_base = mFtx->streams[mCurStreamIndex]->time_base;
-    int64_t seekPos = av_rescale_q((int64_t)(timestamp * AV_TIME_BASE), AV_TIME_BASE_Q, time_base);
+void FFReader::seek(double timestampSec) {
+    int64_t seekPos = buildDemuxerSeekTimestamp(mFtx, mCurStreamIndex, timestampSec);
     // 仅 BACKWARD：seekPos 是时间戳（已 rescale 到流 time_base），不是帧号。
     // AVSEEK_FLAG_FRAME 会把 seekPos 当帧索引解释，导致定位错误。
     int ret = avformat_seek_file(mFtx, mCurStreamIndex, INT64_MIN, seekPos, INT64_MAX, AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
-        LOGE("[FFReader], avformat_seek_file failed, ret: %d, timestamp: %" PRId64, ret, timestamp)
+        int64_t globalTs = (int64_t) (timestampSec * AV_TIME_BASE);
+        AVStream *st = mFtx->streams[mCurStreamIndex];
+        if (st->start_time != AV_NOPTS_VALUE) {
+            globalTs += av_rescale_q(st->start_time, st->time_base, AV_TIME_BASE_Q);
+        }
+        ret = av_seek_frame(mFtx, mCurStreamIndex, globalTs, AVSEEK_FLAG_BACKWARD);
+        LOGW("[FFReader] avformat_seek_file failed, av_seek_frame ret=%d globalTs=%" PRId64
+             " timestampSec=%f",
+             ret, globalTs, timestampSec)
     } else {
-        LOGI("[FFReader], avformat_seek_file, ret: %d, timestamp: %" PRId64 ", seekPos: %" PRId64, ret, timestamp, seekPos)
+        LOGI("[FFReader] avformat_seek_file ok, timestampSec=%f, seekPos=%" PRId64, timestampSec, seekPos)
     }
 }
 

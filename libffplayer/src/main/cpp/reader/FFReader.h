@@ -64,19 +64,17 @@ public:
     bool isKeyFrame(AVPacket *pkt);
 
     /**
-     * 获取timestamp对应的关键帧index，基于BACKWARD
-     * @param timestamp: 时间单位s
-     * @return
+     * 获取 timestamp 对应的关键帧 index，基于 BACKWARD
+     * @param timestampSec 媒体时间，单位：秒（支持小数，如 1.5）
      */
-    int getKeyFrameIndex(int64_t timestamp);
+    int getKeyFrameIndex(double timestampSec);
 
     double getDuration();
 
     /**
-     * seek
-     * @param timestamp: 时间单位s
+     * @param timestampSec 媒体时间，单位：秒（支持小数）
      */
-    void seek(int64_t timestamp);
+    void seek(double timestampSec);
 
     void flush();
 
@@ -93,6 +91,14 @@ public:
 protected:
     AVFormatContext *mFtx = nullptr;
     MediaInfo mMediaInfo;
+
+    /** 媒体秒 → 流 time_base PTS（含 start_time，与 FFMpegPlayer::buildStreamSeekTimestamp 前半一致） */
+    static int64_t streamSeekTargetTs(AVFormatContext *ftx, int streamIdx, double timeSec);
+
+    /** demuxer seek 用：streamSeekTargetTs + 索引关键帧对齐 */
+    static int64_t buildDemuxerSeekTimestamp(AVFormatContext *ftx, int streamIdx, double timeSec);
+
+    int getCurStreamIndex() const { return mCurStreamIndex; }
 
 private:
     const AVCodec *mCodecArr[2]{nullptr, nullptr};
