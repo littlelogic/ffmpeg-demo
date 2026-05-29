@@ -30,7 +30,8 @@ public:
 
     int getRotate();
 
-    void getFrame(int64_t pts, int width, int height, uint8_t *buffer, bool precise = true);
+    /** @param ptsSec 目标媒体时间，单位：秒（支持小数） */
+    void getFrame(double ptsSec, int width, int height, uint8_t *buffer, bool precise = true);
 
     void getNextFrame(const std::function<void(AVFrame *)>& frameArrivedCallback);
 
@@ -41,7 +42,7 @@ public:
 private:
     bool mInit = false;
 
-    int64_t mLastPts = -1;
+    double mLastPtsSec = -1.0;
 
     SwsContext *mSwsContext = nullptr;
 

@@ -67,21 +67,22 @@ bool FFVideoReader::init(std::string &path) {
     return mInit;
 }
 
-void FFVideoReader::getFrame(int64_t pts, int width, int height, uint8_t *buffer, bool precise) {
+void FFVideoReader::getFrame(double ptsSec, int width, int height, uint8_t *buffer, bool precise) {
     int64_t start = getCurrentTimeMs();
-    LOGI("[FFVideoReader], getFrame: %" PRId64 ", mLastPts: %" PRId64 ", width: %d, height: %d", pts, mLastPts, width, height)
-    if (mLastPts == -1) {
+    LOGI("[FFVideoReader], getFrame ptsSec: %f, mLastPtsSec: %f, width: %d, height: %d",
+         ptsSec, mLastPtsSec, width, height)
+    if (mLastPtsSec < 0.0) {
         LOGI("[FFVideoReader], seek")
-        seek(pts);
-    } else if (!precise || getKeyFrameIndex(mLastPts) != getKeyFrameIndex(pts)) {
+        seek(ptsSec);
+    } else if (!precise || getKeyFrameIndex(mLastPtsSec) != getKeyFrameIndex(ptsSec)) {
         LOGI("[FFVideoReader], flush & seek")
         flush();
-        seek(pts);
+        seek(ptsSec);
     } else {
         // only need loop decode
         LOGI("[FFVideoReader], only need loop decode")
     }
-    mLastPts = pts;
+    mLastPtsSec = ptsSec;
 
     AVCodecContext *codecContext = getCodecContext();
     MediaInfo mediaInfo = getMediaInfo();
@@ -91,7 +92,7 @@ void FFVideoReader::getFrame(int64_t pts, int width, int height, uint8_t *buffer
     AVFrame *frame = av_frame_alloc();
     AVPacket *pkt = av_packet_alloc();
 
-    int64_t target = av_rescale_q(pts * AV_TIME_BASE, AV_TIME_BASE_Q, mediaInfo.video_time_base);
+    int64_t target = streamSeekTargetTs(mFtx, getCurStreamIndex(), ptsSec);
     bool find = false;
     bool inputExhausted = false;
     int decodeCount = 0;
