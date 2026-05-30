@@ -9,6 +9,7 @@ import kotlin.math.ceil
  * - 对应一格时间：10s ~ 1/30s
  */
 object TimelineConstants {
+
     const val NOMINAL_FPS = 30.0
     const val FRAMES_PER_SEC = 30
 

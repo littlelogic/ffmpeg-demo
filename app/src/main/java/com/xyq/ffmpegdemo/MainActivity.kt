@@ -35,6 +35,7 @@ import com.xyq.ffmpegdemo.player.IMediaPlayer
 import com.xyq.ffmpegdemo.player.IMediaPlayerStatusListener
 import com.xyq.ffmpegdemo.player.MyPlayer
 import com.xyq.ffmpegdemo.player.PlayerConfig
+import com.xyq.ffmpegdemo.timeline.TimelineConstants
 import com.xyq.ffmpegdemo.viewmodel.PlayViewModel
 import com.xyq.ffmpegdemo.viewmodel.VideoThumbnailViewModel
 import com.xyq.libffplayer.ui.MediaInfoDialogHelper
@@ -231,6 +232,13 @@ class MainActivity : AppCompatActivity() {
             ///读取缩略图触发的问题
             checkPermissionAndRunNext(kotlinx.coroutines.Runnable {
                 checkMediaFileValid(mMediaFilePath, mIsVideo)
+
+                val cellWidth = Tools.dip2px(Tools.getApplication(),TimelineConstants.DEFAULT_MAJOR_TICK_SPACING_DP)
+                val height = Tools.dip2px(Tools.getApplication(),50f)
+                val ptr =  FFMpegUtils.nativeInitVideoReader(mMediaFilePath)
+                mBinding.videoThumbSliderView.ptrOfVideoThumb = ptr
+                FFMpegUtils.nativeVideoReaderSetSize(ptr,cellWidth,height)
+
                 startPlay(mMediaFilePath, mIsVideo)
             })
         }
