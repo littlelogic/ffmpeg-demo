@@ -11,6 +11,7 @@ import android.os.Looper
 import android.util.AttributeSet
 import android.util.LruCache
 import android.view.View
+import com.badlogic.utils.ALog
 import com.badlogic.utils.Tools
 import com.xyq.ffmpegdemo.timeline.ThumbCell
 import com.xyq.ffmpegdemo.timeline.TimelineConfig
@@ -40,11 +41,11 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
     private val thumbnails = object : LruCache<Int, Bitmap>(DEFAULT_CACHE_SIZE) {
         override fun sizeOf(key: Int, value: Bitmap): Int = value.byteCount
-        override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
-//            if (evicted && !oldValue.isRecycled) {
-//                oldValue.recycle()
-//            }
-        }
+        /*override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
+            if (evicted && !oldValue.isRecycled) {
+                oldValue.recycle()
+            }
+        }*/
     }
 
 
@@ -82,10 +83,14 @@ class VideoThumbSliderView @JvmOverloads constructor(
         Tools.getScreenSize(Tools.getApplication()).let {
             val totalWidthPx = minOf(it[0],it[1])
             val num = totalWidthPx / cellWidth + 2
+            ALog.e("-260531p1q-VideoThumbSliderView-init "
+                    +" num:"+num
+            )
             for (i in 0..num) {
-                val cell = ThumbCell(cellWidth.toFloat(),cellHeight.toFloat())
+                val id = -(i+1)
+                val cell = ThumbCell(cellWidth.toFloat(),cellHeight.toFloat(),id)
                 thumbCellList.add(cell)
-                curDrawMap[-i] = cell
+                curDrawMap[id] = cell
             }
         }
     }
@@ -145,6 +150,10 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
         thumbCell.setTimeId(curFrameNum,curTime)
         getThumbTaskList.add(thumbCell)
+        ALog.i("-260531p1q-VideoThumbSliderView-asyncLoadThumbnail-01 "
+                + " curTime:"+curTime
+                + " curFrameNum:"+curFrameNum
+        )
 
         val future = mSliderExecutor.submit {
 
@@ -156,6 +165,11 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 ,curTime,true)
             mHandler.post {
                 bmp?.let {
+                    ALog.i("-260531p1q-VideoThumbSliderView-asyncLoadThumbnail-result "
+                            + " curTime:"+curTime
+                            + " curFrameNum:"+curFrameNum
+                            + " bmp:"+it
+                    )
                     thumbnails.put(cell.curFrameNum,it)
                     cell.setBitmap(it)
                     this@VideoThumbSliderView.invalidate()
@@ -169,7 +183,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
             return
         }
         getThumbTaskList.remove(thumbCell)
-        thumbCell.setTimeId(-1,-1.0)
+        thumbCell.free()
     }
 
     private val drawRect = RectF()
@@ -190,16 +204,24 @@ class VideoThumbSliderView @JvmOverloads constructor(
         val visibleW = if (viewportWidthPx > 0) viewportWidthPx else width
         val firstIndex = (contentScrollX / cellW).toInt().coerceAtLeast(0)
         val lastIndex = ((contentScrollX + visibleW) / cellW).toInt() + 1
-
+        val finalLastIndex = min(lastIndex, cellCount - 1)
         leftList.clear()
-        for (i in firstIndex..min(lastIndex, cellCount - 1)) {
+        ALog.e("-260531p1q-VideoThumbSliderView-onDraw "
+                +" firstIndex:"+firstIndex
+                +" finalLastIndex:"+finalLastIndex
+        )
+        for (i in firstIndex.. finalLastIndex) {
             val oriLeft = i * cellW
-            val curTime = oriLeft * config.pxPerSecond
+            val curTime = oriLeft / config.pxPerSecond
             val curFrameNum = (curTime * TimelineConstants.NOMINAL_FPS).toInt()
             val left = oriLeft + startBlank
             val cellDuration = min(config.gridIntervalSec, config.durationSec - config.gridCellStartSec(i))
             val right = left + (cellDuration / config.gridIntervalSec * cellW).toFloat()
 
+            ALog.i("-260531p1q-VideoThumbSliderView-onDraw "
+                    +" curFrameNum:"+curFrameNum
+                    +" curTime:"+curTime
+            )
             val target = curDrawMap.remove(curFrameNum)
             if (target != null) {
                 target.draw(canvas, left)
@@ -237,6 +259,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                                 thumbnails_b.remove(curFrameNum)
                                 canvas.drawRect(drawRect, cellPaint)
                             } else {
+                                thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
                                 thumbCell.setBitmap(bitmap)
                                 thumbCell.draw(canvas,pair.left)
                             }
@@ -247,12 +270,15 @@ class VideoThumbSliderView @JvmOverloads constructor(
                             thumbnails.remove(curFrameNum)
                             canvas.drawRect(drawRect, cellPaint)
                         } else {
+                            thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
                             thumbCell.setBitmap(bitmap)
                             thumbCell.draw(canvas,pair.left)
                         }
                     }
+
                 }
             } else {
+                tmpDrawMap[thumbCell.oriId] = thumbCell
                 /// 接触之前的加载
                 freeThumbnail(thumbCell)
             }

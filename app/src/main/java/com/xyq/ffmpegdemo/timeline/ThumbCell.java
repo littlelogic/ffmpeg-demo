@@ -5,15 +5,18 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
 
+import com.badlogic.utils.ALog;
+
 public class ThumbCell {
 
-
+    public int oriId = -1;
     public float width;
     public float height;
 
-    public ThumbCell(float width_, float height_) {
+    public ThumbCell(float width_, float height_,int oriId_) {
         width = width_;
         height = height_;
+        oriId = oriId_;
     }
 
     Bitmap bmp;
@@ -23,12 +26,18 @@ public class ThumbCell {
     }
 
     public int curFrameNum;
-    public Double curTime;
+    public double curTime;
 
-    public void setTimeId(int curFrameNum_, Double curTime_) {
+    public void setTimeId(int curFrameNum_, double curTime_) {
         curFrameNum = curFrameNum_;
         curTime = curTime_;
     }
+
+    public void free() {
+        curFrameNum = oriId;
+        curTime = oriId;
+    }
+
 
     private RectF drawRect = new RectF();
     private Paint bitmapPaint = new  Paint(Paint.ANTI_ALIAS_FLAG);
@@ -38,6 +47,10 @@ public class ThumbCell {
 
     public void draw(Canvas canvas,float x) {
         if (bmp != null && !bmp.isRecycled()) {
+            ALog.i("-260531p1q-ThumbCell-draw "
+                    +" curFrameNum:"+curFrameNum
+                    +" curTime:"+curTime
+            );
             drawRect.set(x,0,x + width,height);
             canvas.drawBitmap(bmp, null, drawRect, bitmapPaint);
         }
