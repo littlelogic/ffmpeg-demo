@@ -30,6 +30,14 @@ class VideoThumbSliderView @JvmOverloads constructor(
     defStyleAttr: Int = 0,
 ) : View(context, attrs, defStyleAttr) {
 
+    class DrawBean( var curFrameNum:Int,var curTime: Double, var left: Float){
+        fun setData(curFrameNum_:Int, curTime_: Double,  left_: Float){
+            curFrameNum = curFrameNum_
+            curTime = curTime_
+            left = left_
+        }
+    }
+
     companion object {
         private const val DEFAULT_CACHE_SIZE = 100 * 1024 * 1024 // 100MB
     }
@@ -78,12 +86,14 @@ class VideoThumbSliderView @JvmOverloads constructor(
     val thumbCellList:ArrayList<ThumbCell> = ArrayList()
     var curDrawMap : HashMap<Int, ThumbCell> = HashMap()
     var tmpDrawMap : HashMap<Int, ThumbCell> = HashMap()
+    val tmpDrawBean:ArrayList<DrawBean> = ArrayList()
+
     var TotalShowNum = 5
 
     init {
         Tools.getScreenSize(Tools.getApplication()).let {
             val totalWidthPx = minOf(it[0],it[1])
-            val num = totalWidthPx / cellWidth + 2
+            val num = totalWidthPx / cellWidth + 3
             TotalShowNum = num
             ALog.e("-260531p1q-VideoThumbSliderView-init "
                     +" num:"+num
@@ -93,6 +103,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 val cell = ThumbCell(cellWidth.toFloat(),cellHeight.toFloat(),id)
                 thumbCellList.add(cell)
                 curDrawMap[id] = cell
+                tmpDrawBean.add(DrawBean(0,0.0,0f))
             }
         }
     }
@@ -190,7 +201,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
     private val drawRect = RectF()
 
-    class DrawBean( val curFrameNum:Int,val curTime: Double, val left: Float)
+
 
     var startBlank = 0
     val leftList:ArrayList<DrawBean> = ArrayList()
@@ -215,12 +226,14 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 +" curDrawMap.size:"+curDrawMap.size
         )
         var lastFrameNum = -1
+        var startIndex = -1
         for (i in firstIndex.. finalLastIndex) {
+            startIndex++
             val oriLeft = i * cellW
             val curTime = oriLeft / config.pxPerSecond
             var curFrameNum = (curTime * TimelineConstants.NOMINAL_FPS).toInt()
             if (curFrameNum <= lastFrameNum) {
-                curFrameNum = curFrameNum + 1
+                curFrameNum = lastFrameNum + 1
             }
             lastFrameNum = curFrameNum
             val left = oriLeft + startBlank
@@ -236,7 +249,10 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 target.draw(canvas, left)
                 tmpDrawMap[curFrameNum] = target
             } else {
-                leftList.add(DrawBean(curFrameNum,curTime.toDouble(),left))
+                val bean = tmpDrawBean[startIndex]
+                bean.setData(curFrameNum,curTime.toDouble(),left)
+                leftList.add(bean)
+                ///leftList.add(DrawBean(curFrameNum,curTime.toDouble(),left))
             }
 
 
