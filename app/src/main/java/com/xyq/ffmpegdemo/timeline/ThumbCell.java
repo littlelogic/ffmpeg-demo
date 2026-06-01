@@ -21,9 +21,11 @@ public class ThumbCell {
     }
 
     Bitmap bmp;
+    boolean precise;
 
-    public void setBitmap(Bitmap bmp_) {
+    public void setBitmap(Bitmap bmp_,boolean precise_) {
         bmp = bmp_;
+        precise = precise_;
     }
 
     public int curFrameNum;

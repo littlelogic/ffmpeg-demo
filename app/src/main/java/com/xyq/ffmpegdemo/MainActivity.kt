@@ -36,6 +36,7 @@ import com.xyq.ffmpegdemo.player.IMediaPlayerStatusListener
 import com.xyq.ffmpegdemo.player.MyPlayer
 import com.xyq.ffmpegdemo.player.PlayerConfig
 import com.xyq.ffmpegdemo.timeline.TimelineConstants
+import com.xyq.ffmpegdemo.timeline.view.CustomHorizontalScrollView
 import com.xyq.ffmpegdemo.viewmodel.PlayViewModel
 import com.xyq.ffmpegdemo.viewmodel.VideoThumbnailViewModel
 import com.xyq.libffplayer.ui.MediaInfoDialogHelper
@@ -305,6 +306,9 @@ class MainActivity : AppCompatActivity() {
         mBinding.trackScrollView.layoutParams.width = width
         mBinding.timeScaleView.setOutParentView(mBinding.trackScrollView)
         mBinding.videoThumbSliderView.setOutParentView(mBinding.trackScrollView)
+        (mPlayer as? MyPlayer)?.let {
+            mBinding.videoThumbSliderView.setPlayer(it)
+        }
 
 
         mTimelineConfig.majorTickSpacingPx = TimelineConfig.majorTickSpacingPx(dm.density)
@@ -544,11 +548,19 @@ class MainActivity : AppCompatActivity() {
         mBinding.trackScrollView.setTrackHeaderWidthPx(headerWidthPx)
         mBinding.trackScrollView.setDurationSec(mDuration)
         mBinding.trackScrollView.setScaleEnabled(mIsVideo && mDuration > 0)
-        mBinding.trackScrollView.setOnTimelineScaleListener { _, _ ->
-            applyTimelineConfigToViews()
-            applyTimelineLayout()
-            updateTimelineScrollOffset()
-        }
+        mBinding.trackScrollView.setOnTimelineScaleListener(object :CustomHorizontalScrollView.OnTimelineScaleListener {
+            override fun onTimelineScaleChanged(anchorTimeSec: Double,snapEnd: Boolean) {
+                applyTimelineConfigToViews()
+                applyTimelineLayout()
+                updateTimelineScrollOffset()
+            }
+
+            override fun onTimelineScaleEnd() {
+                applyTimelineConfigToViews()
+                applyTimelineLayout()
+                updateTimelineScrollOffset()
+            }
+        })
     }
 
     private fun setupTimeline(duration: Double) {

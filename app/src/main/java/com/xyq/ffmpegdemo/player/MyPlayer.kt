@@ -64,7 +64,7 @@ class MyPlayer(private val mContext: Context,
 
     private var mSurface: Surface? = null
 
-    private var mState = State.IDLE
+    @Volatile private var mState = State.IDLE
 
     private var mDuration = -1.0
 
@@ -115,6 +115,10 @@ class MyPlayer(private val mContext: Context,
         } else {
             mRenderManager.draw(false)
         }
+    }
+
+    fun getPlayerState(): State {
+        return mState
     }
 
     fun updateFilterEffect(key: String, value: Float) {
@@ -284,6 +288,13 @@ class MyPlayer(private val mContext: Context,
         }
 
         enableAudioVisualizer(true)
+    }
+
+    fun isPlaying(): Boolean {
+        if (mState == State.RESUME || mState == State.START) {
+            return true
+        }
+        return false
     }
 
     override fun pause() {

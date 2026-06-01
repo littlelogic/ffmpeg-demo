@@ -14,6 +14,7 @@ import android.view.View
 import com.badlogic.utils.ALog
 import com.badlogic.utils.Tools
 import com.xyq.ffmpegdemo.R
+import com.xyq.ffmpegdemo.player.MyPlayer
 import com.xyq.ffmpegdemo.timeline.ThumbCell
 import com.xyq.ffmpegdemo.timeline.TimelineConfig
 import com.xyq.ffmpegdemo.timeline.TimelineConstants
@@ -48,7 +49,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
     private var viewportWidthPx = 0
 
 
-    private val thumbnails = object : LruCache<Int, Bitmap>(DEFAULT_CACHE_SIZE) {
+    private val preciseThumbnails = object : LruCache<Int, Bitmap>(DEFAULT_CACHE_SIZE) {
         override fun sizeOf(key: Int, value: Bitmap): Int = value.byteCount
         /*override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
             if (evicted && !oldValue.isRecycled) {
@@ -58,7 +59,8 @@ class VideoThumbSliderView @JvmOverloads constructor(
     }
 
 
-    private val thumbnails_b = object : LruCache<Int, Bitmap>(DEFAULT_CACHE_SIZE) {
+    ///todo 待完善
+    private val noPeciseThumbnails = object : LruCache<Int, Bitmap>(DEFAULT_CACHE_SIZE) {
         override fun sizeOf(key: Int, value: Bitmap): Int = value.byteCount
         /*override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
             if (evicted && !oldValue.isRecycled) {
@@ -116,6 +118,13 @@ class VideoThumbSliderView @JvmOverloads constructor(
     fun setOutParentView(customHorizontalScrollView_ : CustomHorizontalScrollView) {
         customHorizontalScrollView = customHorizontalScrollView_
     }
+
+    var mPlayer: MyPlayer? = null
+
+    fun setPlayer(player_: MyPlayer?) {
+        mPlayer = player_
+    }
+
 
     fun setTimelineConfig(timeline: TimelineConfig) {
         config.durationSec = timeline.durationSec
@@ -183,12 +192,18 @@ class VideoThumbSliderView @JvmOverloads constructor(
             // 以 cell 上 setTimeId 写入的为准，避免闭包里的 curTime/curFrameNum 与 dequeue 到的 cell 不一致
             val frameNum = cell.curFrameNum
             val timeSec = cell.curTime
+            val precise = if (mPlayer?.isPlaying() == true) {
+                false
+            } else {
+                true
+            }
             val bmp = FFMpegUtils.getSingleFrame(
                 ptr = ptrOfVideoThumb,
                 width = cell.width.toInt(),
                 height = cell.width.toInt(),
                 timestampSec = timeSec,
-                precise = true,
+//                precise = precise,
+                precise = false,
             )
             mHandler.post {
                 bmp?.let {
@@ -197,8 +212,13 @@ class VideoThumbSliderView @JvmOverloads constructor(
                             + " curFrameNum:" + frameNum
                             + " bmp:" + it
                     )
-                    thumbnails.put(frameNum, it)
-                    cell.setBitmap(it)
+                    if (precise) {
+                        preciseThumbnails.put(frameNum, it)
+                        cell.setBitmap(it,true)
+                    } else {
+                        noPeciseThumbnails.put(frameNum, it)
+                        cell.setBitmap(it,false)
+                    }
                     this@VideoThumbSliderView.invalidate()
                 }
             }
@@ -295,31 +315,31 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 /////loadThumbnail(pair.first,pair.second,thumbCell)
 
                 run{
-                    var bitmap = thumbnails.get(curFrameNum)
+                    var bitmap = preciseThumbnails.get(curFrameNum)
                     if (bitmap == null) {
-                        bitmap = thumbnails_b.get(curFrameNum)
+                        bitmap = noPeciseThumbnails.get(curFrameNum)
                         if (bitmap == null) {
                             asyncLoadThumbnail(curFrameNum,curTime,thumbCell)
                         } else {
                             if (bitmap.isRecycled) {
                                 asyncLoadThumbnail(curFrameNum,curTime,thumbCell)
-                                thumbnails_b.remove(curFrameNum)
+                                noPeciseThumbnails.remove(curFrameNum)
 //                                canvas.drawRect(left, 0f, right, h, paint)
 //                                canvas.drawRect(drawRect, cellPaint)
                             } else {
                                 thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
-                                thumbCell.setBitmap(bitmap)
+                                thumbCell.setBitmap(bitmap,false)
                                 thumbCell.draw(canvas,pair.left)
                             }
                         }
                     } else {
                         if (bitmap.isRecycled) {
                             asyncLoadThumbnail(curFrameNum,curTime,thumbCell)
-                            thumbnails.remove(curFrameNum)
+                            preciseThumbnails.remove(curFrameNum)
 //                            canvas.drawRect(drawRect, cellPaint)
                         } else {
                             thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
-                            thumbCell.setBitmap(bitmap)
+                            thumbCell.setBitmap(bitmap,true)
                             thumbCell.draw(canvas,pair.left)
                         }
                     }
