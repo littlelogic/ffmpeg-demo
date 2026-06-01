@@ -17,6 +17,7 @@ public class ThumbCell {
         width = width_;
         height = height_;
         oriId = oriId_;
+        free();
     }
 
     Bitmap bmp;

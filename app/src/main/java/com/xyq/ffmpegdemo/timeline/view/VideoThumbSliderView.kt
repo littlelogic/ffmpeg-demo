@@ -78,16 +78,18 @@ class VideoThumbSliderView @JvmOverloads constructor(
     val thumbCellList:ArrayList<ThumbCell> = ArrayList()
     var curDrawMap : HashMap<Int, ThumbCell> = HashMap()
     var tmpDrawMap : HashMap<Int, ThumbCell> = HashMap()
+    var TotalShowNum = 5
 
     init {
         Tools.getScreenSize(Tools.getApplication()).let {
             val totalWidthPx = minOf(it[0],it[1])
             val num = totalWidthPx / cellWidth + 2
+            TotalShowNum = num
             ALog.e("-260531p1q-VideoThumbSliderView-init "
                     +" num:"+num
             )
-            for (i in 0..num) {
-                val id = -(i+1)
+            for (i in 1..num) {
+                val id = -(i)
                 val cell = ThumbCell(cellWidth.toFloat(),cellHeight.toFloat(),id)
                 thumbCellList.add(cell)
                 curDrawMap[id] = cell
@@ -206,14 +208,21 @@ class VideoThumbSliderView @JvmOverloads constructor(
         val lastIndex = ((contentScrollX + visibleW) / cellW).toInt() + 1
         val finalLastIndex = min(lastIndex, cellCount - 1)
         leftList.clear()
+        tmpDrawMap.clear()
         ALog.e("-260531p1q-VideoThumbSliderView-onDraw "
                 +" firstIndex:"+firstIndex
                 +" finalLastIndex:"+finalLastIndex
+                +" curDrawMap.size:"+curDrawMap.size
         )
+        var lastFrameNum = -1
         for (i in firstIndex.. finalLastIndex) {
             val oriLeft = i * cellW
             val curTime = oriLeft / config.pxPerSecond
-            val curFrameNum = (curTime * TimelineConstants.NOMINAL_FPS).toInt()
+            var curFrameNum = (curTime * TimelineConstants.NOMINAL_FPS).toInt()
+            if (curFrameNum <= lastFrameNum) {
+                curFrameNum = curFrameNum + 1
+            }
+            lastFrameNum = curFrameNum
             val left = oriLeft + startBlank
             val cellDuration = min(config.gridIntervalSec, config.durationSec - config.gridCellStartSec(i))
             val right = left + (cellDuration / config.gridIntervalSec * cellW).toFloat()
@@ -239,6 +248,9 @@ class VideoThumbSliderView @JvmOverloads constructor(
             }
         }
 
+        ALog.i("-260531p1q-VideoThumbSliderView-onDraw-69 "
+                +" tmpDrawMap.size:"+tmpDrawMap.size
+        )
         curDrawMap.values.forEachIndexed { index, thumbCell ->
             if (index < leftList.size) {
                 val pair = leftList[index]
@@ -278,16 +290,28 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
                 }
             } else {
-                tmpDrawMap[thumbCell.oriId] = thumbCell
+                tmpDrawMap[thumbCell.curFrameNum] = thumbCell
                 /// 接触之前的加载
-                freeThumbnail(thumbCell)
+                ///-- freeThumbnail(thumbCell)
             }
+        }
+        if (TotalShowNum != tmpDrawMap.size) {
+            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-79 "
+                    +" TotalShowNum:"+TotalShowNum
+                    +" tmpDrawMap.size:"+tmpDrawMap.size
+            )
         }
 
         curDrawMap.clear()
         val tmp = curDrawMap
         curDrawMap = tmpDrawMap
         tmpDrawMap = tmp
+        if (TotalShowNum != curDrawMap.size) {
+            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-89 "
+                    +" TotalShowNum:"+TotalShowNum
+                    +" curDrawMap.size:"+curDrawMap.size
+            )
+        }
 
     }
 
