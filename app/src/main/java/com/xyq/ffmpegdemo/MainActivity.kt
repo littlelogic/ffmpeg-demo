@@ -234,10 +234,10 @@ class MainActivity : AppCompatActivity() {
                 checkMediaFileValid(mMediaFilePath, mIsVideo)
 
                 val cellWidth = Tools.dip2px(Tools.getApplication(),TimelineConstants.DEFAULT_MAJOR_TICK_SPACING_DP)
-                val height = Tools.dip2px(Tools.getApplication(),50f)
+                val thumbHeight = resources.getDimensionPixelSize(R.dimen.video_thumb_slider_height)
                 val ptr =  FFMpegUtils.nativeInitVideoReader(mMediaFilePath)
                 mBinding.videoThumbSliderView.ptrOfVideoThumb = ptr
-                FFMpegUtils.nativeVideoReaderSetSize(ptr,cellWidth,height)
+                FFMpegUtils.nativeVideoReaderSetSize(ptr,cellWidth,thumbHeight)
 
                 startPlay(mMediaFilePath, mIsVideo)
             })
