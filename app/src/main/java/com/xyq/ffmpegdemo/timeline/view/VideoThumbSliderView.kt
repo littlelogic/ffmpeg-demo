@@ -120,6 +120,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
         config.durationSec = timeline.durationSec
         config.majorTickSpacingPx = timeline.majorTickSpacingPx
         config.pxPerSecond = timeline.pxPerSecond
+        changeDrawContent()
         requestLayout()
         invalidate()
     }
@@ -128,6 +129,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
         val sx = scrollX.coerceAtLeast(0)
         if (contentScrollX != sx) {
             contentScrollX = sx
+            changeDrawContent()
             invalidate()
         }
     }
@@ -135,9 +137,16 @@ class VideoThumbSliderView @JvmOverloads constructor(
     fun setViewportWidthPx(width: Int) {
         if (viewportWidthPx != width) {
             viewportWidthPx = width
+            changeDrawContent()
             invalidate()
         }
     }
+
+
+    fun changeDrawContent() {
+
+    }
+
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         var w = config.contentWidthPx
