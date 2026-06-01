@@ -13,6 +13,7 @@ import android.util.LruCache
 import android.view.View
 import com.badlogic.utils.ALog
 import com.badlogic.utils.Tools
+import com.xyq.ffmpegdemo.R
 import com.xyq.ffmpegdemo.timeline.ThumbCell
 import com.xyq.ffmpegdemo.timeline.TimelineConfig
 import com.xyq.ffmpegdemo.timeline.TimelineConstants
@@ -82,19 +83,19 @@ class VideoThumbSliderView @JvmOverloads constructor(
     }
 
     val cellWidth = Tools.dip2px(Tools.getApplication(),TimelineConstants.DEFAULT_MAJOR_TICK_SPACING_DP)
-    val cellHeight = Tools.dip2px(Tools.getApplication(),50f)
+    val cellHeight = Tools.getgetDimension(Tools.getApplication(),R.dimen.video_thumb_slider_height)
     val thumbCellList:ArrayList<ThumbCell> = ArrayList()
     var curDrawMap : HashMap<Int, ThumbCell> = HashMap()
     var tmpDrawMap : HashMap<Int, ThumbCell> = HashMap()
     val tmpDrawBean:ArrayList<DrawBean> = ArrayList()
 
-    var TotalShowNum = 5
+    var totalShowNum = 5
 
     init {
         Tools.getScreenSize(Tools.getApplication()).let {
             val totalWidthPx = minOf(it[0],it[1])
             val num = totalWidthPx / cellWidth + 3
-            TotalShowNum = num
+            totalShowNum = num
             ALog.e("-260531p1q-VideoThumbSliderView-init "
                     +" num:"+num
             )
@@ -325,9 +326,9 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 ///-- freeThumbnail(thumbCell)
             }
         }
-        if (TotalShowNum != tmpDrawMap.size) {
+        if (totalShowNum != tmpDrawMap.size) {
             ALog.e("-260531p1q-VideoThumbSliderView-onDraw-79 "
-                    +" TotalShowNum:"+TotalShowNum
+                    +" TotalShowNum:"+totalShowNum
                     +" tmpDrawMap.size:"+tmpDrawMap.size
             )
         }
@@ -336,9 +337,9 @@ class VideoThumbSliderView @JvmOverloads constructor(
         val tmp = curDrawMap
         curDrawMap = tmpDrawMap
         tmpDrawMap = tmp
-        if (TotalShowNum != curDrawMap.size) {
+        if (totalShowNum != curDrawMap.size) {
             ALog.e("-260531p1q-VideoThumbSliderView-onDraw-89 "
-                    +" TotalShowNum:"+TotalShowNum
+                    +" TotalShowNum:"+totalShowNum
                     +" curDrawMap.size:"+curDrawMap.size
             )
         }

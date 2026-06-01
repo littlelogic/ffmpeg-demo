@@ -149,7 +149,7 @@
             android:layout_width="wrap_content"
             android:layout_height="80dp">
 
-            <LinearLayout
+            <FrameLayout
                 android:id="@+id/trackContent"
                 android:background="#0F0C0C"
                 android:orientation="vertical"
@@ -158,6 +158,7 @@
 
                 <com.xyq.ffmpegdemo.timeline.view.TimeScaleView
                     android:id="@+id/time_scale_view"
+                    android:layout_gravity="top"
                     android:layout_width="match_parent"
                     android:layout_height="32dp" />
 
@@ -165,10 +166,10 @@
                 <com.xyq.ffmpegdemo.timeline.view.VideoThumbSliderView
                     android:id="@+id/video_thumb_slider_view"
                     android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1" />
+                    android:layout_height="@dimen/video_thumb_slider_height"
+                    android:layout_gravity="bottom" />
 
-            </LinearLayout>
+            </FrameLayout>
 
         </LinearLayout>
 
