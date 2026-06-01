@@ -44,6 +44,10 @@ typedef struct MediaInfo {
     int audioIndex = -1;
     AVRational audio_time_base;
 
+    AVRational fps_base;
+    double fps = -1;
+    double frame_to_second = -1;
+
 } MediaInfo;
 
 /**

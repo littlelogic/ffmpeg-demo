@@ -21,6 +21,8 @@ extern "C" {
 
 namespace {
 
+constexpr double kPtsSecEpsilon = 1e-6;
+
 /** 精准抽帧：当前帧是否达到目标时间（流 time_base 下的 pts） */
 bool frameMatchesSeekTarget(const AVFrame *frame, int64_t targetPts, bool precise) {
     if (!precise) {
@@ -72,15 +74,31 @@ void FFVideoReader::getFrame(double ptsSec, int width, int height, uint8_t *buff
     LOGI("[FFVideoReader], getFrame ptsSec: %f, mLastPtsSec: %f, width: %d, height: %d",
          ptsSec, mLastPtsSec, width, height)
     if (mLastPtsSec < 0.0) {
-        LOGI("[FFVideoReader], seek")
+        LOGI("[FFVideoReader], first seek")
         seek(ptsSec);
-    } else if (!precise || getKeyFrameIndex(mLastPtsSec) != getKeyFrameIndex(ptsSec)) {
-        LOGI("[FFVideoReader], flush & seek")
+    } else if (!precise) {
+        // 非精准：首帧即命中，每次需重新定位
+        LOGI("[FFVideoReader], imprecise flush & seek")
         flush();
         seek(ptsSec);
     } else {
-        // only need loop decode
-        LOGI("[FFVideoReader], only need loop decode")
+        const int lastKeyIndex = getKeyFrameIndex(mLastPtsSec);
+        const int targetKeyIndex = getKeyFrameIndex(ptsSec);
+
+        bool canIncrementalDecodeInGop = false;
+        if (mMediaInfo.frame_to_second > kPtsSecEpsilon) {
+            if (lastKeyIndex == targetKeyIndex && ptsSec > (mLastPtsSec + mMediaInfo.frame_to_second * 2.6)) {
+                canIncrementalDecodeInGop = true;
+            }
+        }
+
+        if (canIncrementalDecodeInGop) {
+            LOGI("[FFVideoReader], same GOP forward, loop decode only")
+        } else {
+            LOGI("[FFVideoReader], flush & seek (backward/equal/new GOP)")
+            flush();
+            seek(ptsSec);
+        }
     }
     mLastPtsSec = ptsSec;
 
@@ -229,6 +247,10 @@ void FFVideoReader::getFrame(double ptsSec, int width, int height, uint8_t *buff
             av_freep(&swFrame);
             av_free(rgbaBuffer);
         }
+        mLastPtsSec = ptsSec;
+    } else {
+        // 解码未命中时勿保留“可增量解码”假设，下次强制重新 seek
+        mLastPtsSec = -1.0;
     }
 
     av_packet_unref(pkt);

@@ -133,6 +133,14 @@ int FFReader::prepare() {
         mMediaInfo.video_time_base = mFtx->streams[mCurStreamIndex]->time_base;
         mMediaInfo.width = codecContext->width;
         mMediaInfo.height = codecContext->height;
+
+        mMediaInfo.fps_base = av_guess_frame_rate(mFtx, mFtx->streams[mCurStreamIndex], nullptr);
+        if (mMediaInfo.fps_base.den != 0) {
+            mMediaInfo.fps = av_q2d(mMediaInfo.fps_base);
+            if (mMediaInfo.fps > 0) {
+                mMediaInfo.frame_to_second = 1.0 / mMediaInfo.fps;
+            }
+        }
         if (mDiscardType != DISCARD_NONE) {
             switch (mDiscardType) {
                 case DISCARD_NONREF: {

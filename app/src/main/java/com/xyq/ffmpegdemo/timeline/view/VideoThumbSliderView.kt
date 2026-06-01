@@ -244,8 +244,13 @@ class VideoThumbSliderView @JvmOverloads constructor(
         for (i in firstIndex.. finalLastIndex) {
             startIndex++
             val oriLeft = i * cellW
-            val curTime = oriLeft / config.pxPerSecond
-            var curFrameNum = (curTime * TimelineConstants.NOMINAL_FPS).toInt()
+            val tmpCurTime = oriLeft / config.pxPerSecond
+            val seconds = tmpCurTime.toInt()
+            val leftFrameNum = ((tmpCurTime - seconds) * TimelineConstants.NOMINAL_FPS).toInt()
+            val curTime = seconds + leftFrameNum / TimelineConstants.NOMINAL_FPS
+            var curFrameNum = seconds * TimelineConstants.FRAMES_PER_SEC + leftFrameNum
+            ///var curFrameNum = (curTime * TimelineConstants.NOMINAL_FPS).toInt()
+
             if (curFrameNum <= lastFrameNum) {
                 curFrameNum = lastFrameNum + 1
             }
