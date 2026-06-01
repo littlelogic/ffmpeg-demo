@@ -178,13 +178,12 @@ void FFVideoReader::getFrame(double ptsSec, int width, int height, uint8_t *buff
                         scaleBuffer + width * height * 5 / 4, width / 2,
                         width, height, libyuv::kFilterNone);
 
-                // I420ToARGB：little-endian 下内存为 BGRA，与 Android Bitmap ARGB_8888 一致
-                libyuv::I420ToARGB(scaleBuffer, width,
+                libyuv::I420ToABGR(scaleBuffer, width,
                                    scaleBuffer + width * height, width / 2,
                                    scaleBuffer + width * height * 5 / 4, width / 2,
                                    buffer, width * 4, width, height);
             } else {
-                libyuv::I420ToARGB(frame->data[0], frame->linesize[0],
+                libyuv::I420ToABGR(frame->data[0], frame->linesize[0],
                                    frame->data[1], frame->linesize[1],
                                    frame->data[2], frame->linesize[2],
                                    buffer, width * 4, width, height);

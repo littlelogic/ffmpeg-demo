@@ -80,7 +80,6 @@ object FFMpegUtils {
      * 从已 [nativeInitVideoReader] 的实例抽取单帧，像素写入 DirectByteBuffer（与 [getVideoFrames] 相同）。
      * @param timestampSec 媒体时间，单位：秒，支持小数（如 1.5 表示 1.5 秒处）
      * 输出尺寸由 [nativeVideoReaderSetSize] 决定；未设置时使用原视频宽高。
-     * YUV420P 经 libyuv I420ToARGB 输出，little-endian 下字节序与 Bitmap ARGB_8888 一致。
      */
     fun getSingleFrame(ptr: Long, timestampSec: Double, precise: Boolean = true): ByteBuffer? {
         if (ptr == 0L) return null
@@ -96,6 +95,7 @@ object FFMpegUtils {
     ): Bitmap?{
         val buffer = getSingleFrame(ptr, timestampSec, precise) ?: return null
         buffer.rewind()
+        // 这里假设输出格式为 RGBA8888，根据实际情况调整
         return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
             copyPixelsFromBuffer(buffer)
         }
