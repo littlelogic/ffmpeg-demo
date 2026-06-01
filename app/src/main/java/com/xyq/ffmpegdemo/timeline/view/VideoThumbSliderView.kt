@@ -59,11 +59,11 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
     private val thumbnails_b = object : LruCache<Int, Bitmap>(DEFAULT_CACHE_SIZE) {
         override fun sizeOf(key: Int, value: Bitmap): Int = value.byteCount
-        override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
+        /*override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
             if (evicted && !oldValue.isRecycled) {
                 oldValue.recycle()
             }
-        }
+        }*/
     }
 
     private val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -177,22 +177,26 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 + " curFrameNum:"+curFrameNum
         )
 
-        val future = mSliderExecutor.submit {
-
-            val cell:ThumbCell = getThumbTaskList.remove()
+        mSliderExecutor.submit {
+            val cell = getThumbTaskList.remove()
+            // 以 cell 上 setTimeId 写入的为准，避免闭包里的 curTime/curFrameNum 与 dequeue 到的 cell 不一致
+            val frameNum = cell.curFrameNum
+            val timeSec = cell.curTime
             val bmp = FFMpegUtils.getSingleFrame(
                 ptr = ptrOfVideoThumb,
                 width = cell.width.toInt(),
-                height = cell.width.toInt()
-                ,curTime,true)
+                height = cell.width.toInt(),
+                timestampSec = timeSec,
+                precise = true,
+            )
             mHandler.post {
                 bmp?.let {
                     ALog.i("-260531p1q-VideoThumbSliderView-asyncLoadThumbnail-result "
-                            + " curTime:"+curTime
-                            + " curFrameNum:"+curFrameNum
-                            + " bmp:"+it
+                            + " curTime:" + timeSec
+                            + " curFrameNum:" + frameNum
+                            + " bmp:" + it
                     )
-                    thumbnails.put(cell.curFrameNum,it)
+                    thumbnails.put(frameNum, it)
                     cell.setBitmap(it)
                     this@VideoThumbSliderView.invalidate()
                 }
@@ -294,7 +298,8 @@ class VideoThumbSliderView @JvmOverloads constructor(
                             if (bitmap.isRecycled) {
                                 asyncLoadThumbnail(curFrameNum,curTime,thumbCell)
                                 thumbnails_b.remove(curFrameNum)
-                                canvas.drawRect(drawRect, cellPaint)
+//                                canvas.drawRect(left, 0f, right, h, paint)
+//                                canvas.drawRect(drawRect, cellPaint)
                             } else {
                                 thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
                                 thumbCell.setBitmap(bitmap)
@@ -305,7 +310,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                         if (bitmap.isRecycled) {
                             asyncLoadThumbnail(curFrameNum,curTime,thumbCell)
                             thumbnails.remove(curFrameNum)
-                            canvas.drawRect(drawRect, cellPaint)
+//                            canvas.drawRect(drawRect, cellPaint)
                         } else {
                             thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
                             thumbCell.setBitmap(bitmap)
@@ -343,5 +348,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         mSliderExecutor.shutdown()
+        FFMpegUtils.nativeCloseVideoReader(ptrOfVideoThumb)
     }
 }
