@@ -87,9 +87,10 @@ class VideoThumbSliderView @JvmOverloads constructor(
     val cellWidth = Tools.dip2px(Tools.getApplication(),TimelineConstants.DEFAULT_MAJOR_TICK_SPACING_DP)
     val cellHeight = Tools.getgetDimension(Tools.getApplication(),R.dimen.video_thumb_slider_height)
     val thumbCellList:ArrayList<ThumbCell> = ArrayList()
-    var curDrawMap : HashMap<Int, ThumbCell> = HashMap()
-    var tmpDrawMap : HashMap<Int, ThumbCell> = HashMap()
+    var curDrawMap : HashMap<Int, ThumbCell?> = HashMap()
+    var tmpDrawMap : HashMap<Int, ThumbCell?> = HashMap()
     val tmpDrawBean:ArrayList<DrawBean> = ArrayList()
+    val drawThumbCellList:ArrayList<ThumbCell?> = ArrayList()
 
     var totalShowNum = 5
 
@@ -105,6 +106,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 val id = -(i)
                 val cell = ThumbCell(cellWidth.toFloat(),cellHeight.toFloat(),id)
                 thumbCellList.add(cell)
+                drawThumbCellList.add(cell)
                 curDrawMap[id] = cell
                 tmpDrawBean.add(DrawBean(0,0.0,0f))
             }
@@ -152,6 +154,9 @@ class VideoThumbSliderView @JvmOverloads constructor(
         }
     }
 
+
+//    val firstIndex = -1
+//    val lastIndex = -1
 
     fun changeDrawContent() {
 
@@ -203,7 +208,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 height = cell.width.toInt(),
                 timestampSec = timeSec,
 //                precise = precise,
-                precise = false,
+                precise = true,
             )
             mHandler.post {
                 bmp?.let {
@@ -258,9 +263,15 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 +" firstIndex:"+firstIndex
                 +" finalLastIndex:"+finalLastIndex
                 +" curDrawMap.size:"+curDrawMap.size
+                +" -----------------"
         )
+        for (i in 0 until drawThumbCellList.size) {
+            drawThumbCellList[i] = null
+        }
+
         var lastFrameNum = -1
         var startIndex = -1
+
         for (i in firstIndex.. finalLastIndex) {
             startIndex++
             val oriLeft = i * cellW
@@ -283,17 +294,18 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     +" curFrameNum:"+curFrameNum
                     +" curTime:"+curTime
             )
-            val target = curDrawMap.remove(curFrameNum)
+//            val target = curDrawMap.remove(curFrameNum)
+            val target = curDrawMap[curFrameNum]
             if (target != null) {
-                target.draw(canvas, left)
+                target.setDrawX(left)
+                curDrawMap[curFrameNum] = null
                 tmpDrawMap[curFrameNum] = target
+                drawThumbCellList[startIndex] = target
             } else {
                 val bean = tmpDrawBean[startIndex]
                 bean.setData(curFrameNum,curTime.toDouble(),left)
                 leftList.add(bean)
-                ///leftList.add(DrawBean(curFrameNum,curTime.toDouble(),left))
             }
-
 
             if (false) {
                 //            val right = left + cellW
@@ -306,13 +318,30 @@ class VideoThumbSliderView @JvmOverloads constructor(
         ALog.i("-260531p1q-VideoThumbSliderView-onDraw-69 "
                 +" tmpDrawMap.size:"+tmpDrawMap.size
         )
-        curDrawMap.values.forEachIndexed { index, thumbCell ->
+
+        var index = -1
+        var indexOfWillDraw = 0
+        curDrawMap.values.forEach { thumbCell ->
+            if (thumbCell == null) {
+                return@forEach
+            }
+            index++
+
             if (index < leftList.size) {
+
                 val pair = leftList[index]
                 val curFrameNum = pair.curFrameNum
                 val curTime = pair.curTime
                 tmpDrawMap[pair.curFrameNum] = thumbCell
-                /////loadThumbnail(pair.first,pair.second,thumbCell)
+                thumbCell.setDrawX(pair.left)
+
+                for (i in indexOfWillDraw until drawThumbCellList.size) {
+                    if (drawThumbCellList[i] == null) {
+                        drawThumbCellList[i] = thumbCell
+                        indexOfWillDraw = i + 1
+                        break
+                    }
+                }
 
                 run{
                     var bitmap = preciseThumbnails.get(curFrameNum)
@@ -329,7 +358,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
                             } else {
                                 thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
                                 thumbCell.setBitmap(bitmap,false)
-                                thumbCell.draw(canvas,pair.left)
                             }
                         }
                     } else {
@@ -340,10 +368,15 @@ class VideoThumbSliderView @JvmOverloads constructor(
                         } else {
                             thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
                             thumbCell.setBitmap(bitmap,true)
-                            thumbCell.draw(canvas,pair.left)
                         }
                     }
 
+                }
+
+                if (thumbCell.drawX == 0f){
+                    ALog.e("-260531p1q-VideoThumbSliderView-onDraw-79 thumbCell.drawX == 0f"
+                            +" TotalShowNum:"+totalShowNum
+                    )
                 }
             } else {
                 tmpDrawMap[thumbCell.curFrameNum] = thumbCell
@@ -351,6 +384,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 ///-- freeThumbnail(thumbCell)
             }
         }
+
         if (totalShowNum != tmpDrawMap.size) {
             ALog.e("-260531p1q-VideoThumbSliderView-onDraw-79 "
                     +" TotalShowNum:"+totalShowNum
@@ -367,6 +401,28 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     +" TotalShowNum:"+totalShowNum
                     +" curDrawMap.size:"+curDrawMap.size
             )
+        }
+
+        var lastBmp: Bitmap? = null
+        for (i in 0 until drawThumbCellList.size) {
+            if (drawThumbCellList[i]?.realBmp != null){
+                lastBmp = drawThumbCellList[i]?.realBmp
+                break
+            }
+        }
+        if (lastBmp == null) {
+            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-83 (lastBmp == null)"
+                    +" TotalShowNum:"+totalShowNum
+            )
+        }
+
+        for (i in 0 until drawThumbCellList.size) {
+            if (drawThumbCellList[i]?.realBmp != null){
+                lastBmp = drawThumbCellList[i]?.realBmp
+            } else {
+                drawThumbCellList[i]?.tmpBmp = lastBmp
+            }
+            drawThumbCellList[i]?.drawSelf(canvas)
         }
 
     }

@@ -20,11 +20,11 @@ public class ThumbCell {
         free();
     }
 
-    Bitmap bmp;
+    public Bitmap realBmp;
     boolean precise;
 
     public void setBitmap(Bitmap bmp_,boolean precise_) {
-        bmp = bmp_;
+        realBmp = bmp_;
         precise = precise_;
     }
 
@@ -41,6 +41,10 @@ public class ThumbCell {
         curTime = oriId;
     }
 
+    public int showIndex = 0;
+
+    public Bitmap tmpBmp;
+
 
     private RectF drawRect = new RectF();
     private Paint bitmapPaint = new  Paint(Paint.ANTI_ALIAS_FLAG);
@@ -48,19 +52,60 @@ public class ThumbCell {
         bitmapPaint.setFilterBitmap(true);
     }
 
-    public void draw(Canvas canvas,float x) {
-        if (bmp != null && !bmp.isRecycled()) {
+    public float drawX = 0f;
+
+    public void setDrawX(float x) {
+        drawX = x;
+    }
+
+    public void drawSelf(Canvas canvas) {
+        if (curFrameNum < 0) {
+            return;
+        }
+        if (drawX == 0) {
+            ALog.i("-260531p1q-ThumbCell-drawSelf "
+                    +" curFrameNum:"+curFrameNum
+                    +" drawX:"+drawX
+            );
+        }
+        if (realBmp != null && !realBmp.isRecycled()) {
             ALog.i("-260531p1q-ThumbCell-draw "
                     +" curFrameNum:"+curFrameNum
                     +" curTime:"+curTime
             );
-            drawRect.set(x,0,x + width,height);
-            canvas.drawBitmap(bmp, null, drawRect, bitmapPaint);
+            drawRect.set(drawX,0,drawX + width,height);
+            canvas.drawBitmap(realBmp, null, drawRect, bitmapPaint);
+        } else {
+            if (tmpBmp != null && !tmpBmp.isRecycled()) {
+                ALog.i("-260531p1q-ThumbCell-draw "
+                        +" curFrameNum:"+curFrameNum
+                        +" curTime:"+curTime
+                );
+                drawRect.set(drawX,0,drawX + width,height);
+                canvas.drawBitmap(tmpBmp, null, drawRect, bitmapPaint);
+            }
         }
     }
 
 
 
+
+
+
+    private static RectF drawRect_s = new RectF();
+    private static Paint bitmapPaint_s = new  Paint(Paint.ANTI_ALIAS_FLAG);
+    static{
+        bitmapPaint_s.setFilterBitmap(true);
+    }
+
+    public static void draw(Canvas canvas,Bitmap targetBmp,float x,float width,float height) {
+        if (targetBmp != null && !targetBmp.isRecycled()) {
+            ALog.i("-260531p1q-ThumbCell-draw "
+            );
+            drawRect_s.set(x,0,x + width,height);
+            canvas.drawBitmap(targetBmp, null, drawRect_s, bitmapPaint_s);
+        }
+    }
 
 
 
