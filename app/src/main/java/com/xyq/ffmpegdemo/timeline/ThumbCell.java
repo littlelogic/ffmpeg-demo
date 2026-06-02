@@ -51,7 +51,7 @@ public class ThumbCell {
     }
 
     public boolean realIsValid() {
-        if (precise && realBmp != null && curFrameNum >= 0) {
+        if (/*precise &&*/ realBmp != null && curFrameNum >= 0) {
             return true;
         }
         return false;
