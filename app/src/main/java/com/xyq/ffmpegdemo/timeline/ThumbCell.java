@@ -37,7 +37,7 @@ public class ThumbCell {
     }
 
     public void free() {
-        if (realBmp != null) {
+        if (realBmp != null && curFrameNum >= 0) {
             tmpBmp = realBmp;
             tmpFrameNum = curFrameNum;
             tmpTime = curTime;

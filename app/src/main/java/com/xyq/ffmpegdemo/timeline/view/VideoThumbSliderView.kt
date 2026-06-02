@@ -235,10 +235,14 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     )
                     if (precise) {
                         preciseThumbnails.put(frameNum, it)
-                        cell.setBitmap(it,true)
+                        if (cell.curFrameNum == frameNum) {
+                            cell.setBitmap(it,true)
+                        }
                     } else {
                         noPeciseThumbnails.put(frameNum, it)
-                        cell.setBitmap(it,false)
+                        if (cell.curFrameNum == frameNum) {
+                            cell.setBitmap(it,false)
+                        }
                     }
                     this@VideoThumbSliderView.invalidate()
                 }
@@ -256,7 +260,63 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
     private val drawRect = RectF()
 
-
+    fun sortDrawBitmap(header:ThumbCell?,tailer :ThumbCell?,startIndex:Int,endIndex:Int) {
+        if (startIndex > endIndex) {
+            return
+        }
+        var lastThumbCell = header
+        if (lastThumbCell != null && tailer != null) {
+            for (i in startIndex..endIndex) {
+                val target = drawThumbCellList[i]
+                if (target != null) {
+                    if (target.tmpIsValid()) {
+                        if (target.tmpFrameNum > lastThumbCell!!.tmpFrameNum) {
+                            if (target.tmpFrameNum < tailer.tmpFrameNum) {
+                                lastThumbCell = target
+                            } else {
+                                target.tmpSetTmpData(lastThumbCell)
+                            }
+                        } else {
+                            target.tmpSetTmpData(lastThumbCell)
+                        }
+                    } else {
+                        target.tmpSetTmpData(lastThumbCell)
+                    }
+                }
+            }
+        } else if (header == null && tailer != null) {
+            lastThumbCell = tailer
+            for (i in endIndex downTo startIndex) {
+                val target = drawThumbCellList[i]
+                if (target != null) {
+                    if (target.tmpIsValid()) {
+                        if (target.tmpFrameNum < lastThumbCell!!.tmpFrameNum) {
+                            lastThumbCell = target
+                        } else {
+                            target.tmpSetTmpData(lastThumbCell)
+                        }
+                    } else {
+                        target.tmpSetTmpData(lastThumbCell)
+                    }
+                }
+            }
+        } else if (header != null && tailer == null) {
+            for (i in startIndex..endIndex) {
+                val target = drawThumbCellList[i]
+                if (target != null) {
+                    if (target.tmpIsValid()) {
+                        if (target.tmpFrameNum > lastThumbCell!!.tmpFrameNum) {
+                            lastThumbCell = target
+                        } else {
+                            target.tmpSetTmpData(lastThumbCell)
+                        }
+                    } else {
+                        target.tmpSetTmpData(lastThumbCell)
+                    }
+                }
+            }
+        }
+    }
 
     var startBlank = 0
     val leftList:ArrayList<DrawBean> = ArrayList()
@@ -408,64 +468,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
             )
         }
 
-        fun sortDrawBitmap(header:ThumbCell?,tailer :ThumbCell?,startIndex:Int,endIndex:Int) {
-            if (startIndex > endIndex) {
-                return
-            }
-            var lastThumbCell = header
-            if (lastThumbCell != null && tailer != null) {
-                for (i in startIndex..endIndex) {
-                    val target = drawThumbCellList[i]
-                    if (target != null) {
-                        if (target.tmpIsValid()) {
-                            if (target.tmpFrameNum > lastThumbCell!!.tmpFrameNum) {
-                                if (target.tmpFrameNum < tailer.tmpFrameNum) {
-                                    lastThumbCell = target
-                                } else {
-                                    target.tmpSetTmpData(lastThumbCell)
-                                }
-                            } else {
-                                target.tmpSetTmpData(lastThumbCell)
-                            }
-                        } else {
-                            target.tmpSetTmpData(lastThumbCell)
-                        }
-                    }
-                }
-            } else if (header == null && tailer != null) {
-                lastThumbCell = tailer
-                for (i in endIndex downTo startIndex) {
-                    val target = drawThumbCellList[i]
-                    if (target != null) {
-                        if (target.tmpIsValid()) {
-                            if (target.tmpFrameNum < lastThumbCell!!.tmpFrameNum) {
-                                lastThumbCell = target
-                            } else {
-                                target.tmpSetTmpData(lastThumbCell)
-                            }
-                        } else {
-                            target.tmpSetTmpData(lastThumbCell)
-                        }
-                    }
-                }
-            } else if (header != null && tailer == null) {
-                for (i in startIndex..endIndex) {
-                    val target = drawThumbCellList[i]
-                    if (target != null) {
-                        if (target.tmpIsValid()) {
-                            if (target.tmpFrameNum > lastThumbCell!!.tmpFrameNum) {
-                                lastThumbCell = target
-                            } else {
-                                target.tmpSetTmpData(lastThumbCell)
-                            }
-                        } else {
-                            target.tmpSetTmpData(lastThumbCell)
-                        }
-                    }
-                }
-            }
-        }
-
         if (true) {
             val stringBuilder : StringBuilder = StringBuilder()
             for (i in 0 until drawNumber) {
@@ -499,7 +501,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
         if (true) {
             val stringBuilder : StringBuilder = StringBuilder()
             for (i in 0 until drawNumber) {
-                val cell = drawThumbCellList[i] ?: return
+                val cell = drawThumbCellList[i] ?: continue
                 val realBmpIsNull = cell.realBmp == null
                 val tmpBmpIsNull = cell.tmpBmp == null
                 stringBuilder.append("{index:").append(i)
@@ -584,7 +586,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
             }
         }
 
-
         if (true) {
             val stringBuilder : StringBuilder = StringBuilder()
             for (i in 0 until drawNumber) {
@@ -601,7 +602,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     +" info5:"+stringBuilder.toString()
             )
         }
-
 
         if (true) {
             var lastFrameNum = -11
@@ -636,12 +636,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
             }
         }
-
-
-
-
-
-
 
     }
 
