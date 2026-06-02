@@ -26,7 +26,7 @@ import kotlin.math.min
 /**
  * 缩略图条带：一格宽度与时间刻度一格相同（默认 50dp），一格时间跨度与刻度同步。
  */
-class VideoThumbSliderView @JvmOverloads constructor(
+class VideoThumbSliderView_b @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
@@ -158,7 +158,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
 //    val firstIndex = -1
 //    val lastIndex = -1
 
-    fun changeDrawContent111() {
+    fun changeDrawContent() {
 
     }
 
@@ -224,7 +224,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                         noPeciseThumbnails.put(frameNum, it)
                         cell.setBitmap(it,false)
                     }
-                    this@VideoThumbSliderView.invalidate()
+                    this@VideoThumbSliderView_b.invalidate()
                 }
             }
         }
@@ -245,7 +245,9 @@ class VideoThumbSliderView @JvmOverloads constructor(
     var startBlank = 0
     val leftList:ArrayList<DrawBean> = ArrayList()
 
-    fun changeDrawContent() {
+    @SuppressLint("DrawAllocation")
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
         if (config.durationSec <= 0 || config.gridCellWidthPx <= 0) return
 
         val cellW = config.gridCellWidthPx
@@ -308,8 +310,8 @@ class VideoThumbSliderView @JvmOverloads constructor(
             if (false) {
                 //            val right = left + cellW
                 val paint = if (i and 1 == 0) cellPaint else cellAltPaint
-//                canvas.drawRect(left, 0f, right, h, paint)
-//                canvas.drawRect(left, 0f, right, h, borderPaint)
+                canvas.drawRect(left, 0f, right, h, paint)
+                canvas.drawRect(left, 0f, right, h, borderPaint)
             }
         }
 
@@ -400,11 +402,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     +" curDrawMap.size:"+curDrawMap.size
             )
         }
-    }
 
-    @SuppressLint("DrawAllocation")
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
         var lastBmp: Bitmap? = null
         for (i in 0 until drawThumbCellList.size) {
             if (drawThumbCellList[i]?.realBmp != null){
@@ -417,6 +415,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     +" TotalShowNum:"+totalShowNum
             )
         }
+
         for (i in 0 until drawThumbCellList.size) {
             if (drawThumbCellList[i]?.realBmp != null){
                 lastBmp = drawThumbCellList[i]?.realBmp
@@ -425,6 +424,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
             }
             drawThumbCellList[i]?.drawSelf(canvas)
         }
+
     }
 
     override fun onDetachedFromWindow() {
