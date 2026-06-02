@@ -468,23 +468,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
             )
         }
 
-        if (true) {
-            val stringBuilder : StringBuilder = StringBuilder()
-            for (i in 0 until drawNumber) {
-                val cell = drawThumbCellList[i] ?: continue
-                val realBmpIsNull = cell.realBmp == null
-                val tmpBmpIsNull = cell.tmpBmp == null
-                stringBuilder.append("{index:").append(i)
-                    .append(",realBmpIsNull:").append(realBmpIsNull)
-                    .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
-                    .append("}")
-//                    .append("\n")
-            }
-            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
-                    +" info1:"+stringBuilder.toString()
-            )
-        }
-
+        logTestInfo("info1",drawNumber)
 
         var lastThumbCell:ThumbCell? = null
         var lastThumbCellIndex = -1
@@ -498,43 +482,13 @@ class VideoThumbSliderView @JvmOverloads constructor(
             }
         }
 
-        if (true) {
-            val stringBuilder : StringBuilder = StringBuilder()
-            for (i in 0 until drawNumber) {
-                val cell = drawThumbCellList[i] ?: continue
-                val realBmpIsNull = cell.realBmp == null
-                val tmpBmpIsNull = cell.tmpBmp == null
-                stringBuilder.append("{index:").append(i)
-                    .append(",realBmpIsNull:").append(realBmpIsNull)
-                    .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
-                    .append("}")
-//                    .append("\n")
-            }
-            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
-                    +" info2:"+stringBuilder.toString()
-            )
-        }
+        logTestInfo("info2",drawNumber)
 
         if (lastThumbCell != null) {
             if (lastThumbCellIndex < drawNumber - 1) {
                 sortDrawBitmap(lastThumbCell,null,lastThumbCellIndex+1,drawNumber - 1)
             }
-            if (true) {
-                val stringBuilder : StringBuilder = StringBuilder()
-                for (i in 0 until drawNumber) {
-                    val cell = drawThumbCellList[i] ?: continue
-                    val realBmpIsNull = cell.realBmp == null
-                    val tmpBmpIsNull = cell.tmpBmp == null
-                    stringBuilder.append("{index:").append(i)
-                        .append(",realBmpIsNull:").append(realBmpIsNull)
-                        .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
-                        .append("}")
-//                    .append("\n")
-                }
-                ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
-                        +" info3:"+stringBuilder.toString()
-                )
-            }
+            logTestInfo("info3",drawNumber)
         } else {
             lastThumbCell = null
             lastThumbCellIndex = -1
@@ -557,22 +511,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     lastThumbCellIndex = i
                 }
             }
-            if (true) {
-                val stringBuilder : StringBuilder = StringBuilder()
-                for (i in 0 until drawNumber) {
-                    val cell = drawThumbCellList[i] ?: continue
-                    val realBmpIsNull = cell.realBmp == null
-                    val tmpBmpIsNull = cell.tmpBmp == null
-                    stringBuilder.append("{index:").append(i)
-                        .append(",realBmpIsNull:").append(realBmpIsNull)
-                        .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
-                        .append("}")
-//                    .append("\n")
-                }
-                ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
-                        +" info4:"+stringBuilder.toString()
-                )
-            }
+            logTestInfo("info4",drawNumber)
             if (lastThumbCell != null) {
                 if (lastThumbCellIndex < drawNumber - 1) {
                     for (j in (lastThumbCellIndex+1) until drawNumber) {
@@ -586,22 +525,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
             }
         }
 
-        if (true) {
-            val stringBuilder : StringBuilder = StringBuilder()
-            for (i in 0 until drawNumber) {
-                val cell = drawThumbCellList[i] ?: continue
-                val realBmpIsNull = cell.realBmp == null
-                val tmpBmpIsNull = cell.tmpBmp == null
-                stringBuilder.append("{index:").append(i)
-                    .append(",realBmpIsNull:").append(realBmpIsNull)
-                    .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
-                    .append("}")
-//                    .append("\n")
-            }
-            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
-                    +" info5:"+stringBuilder.toString()
-            )
-        }
+        logTestInfo("info5",drawNumber)
 
         if (true) {
             var lastFrameNum = -11
@@ -637,6 +561,23 @@ class VideoThumbSliderView @JvmOverloads constructor(
             }
         }
 
+    }
+
+    fun logTestInfo(tag:String, drawNumber:Int) {
+        val stringBuilder : StringBuilder = StringBuilder()
+        for (i in 0 until drawNumber) {
+            val cell = drawThumbCellList[i] ?: continue
+            val realBmpIsNull = cell.realBmp == null
+            val tmpBmpIsNull = cell.tmpBmp == null
+            stringBuilder.append("{index:").append(i)
+                .append(",realBmpIsNull:").append(realBmpIsNull)
+                .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
+                .append("}")
+//                    .append("\n")
+        }
+        ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
+                +" "+tag+":"+stringBuilder.toString()
+        )
     }
 
     @SuppressLint("DrawAllocation")
