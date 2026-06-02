@@ -37,13 +37,58 @@ public class ThumbCell {
     }
 
     public void free() {
+        if (realBmp != null) {
+            tmpBmp = realBmp;
+            tmpFrameNum = curFrameNum;
+            tmpTime = curTime;
+        }
+
+        realBmp = null;
+        precise = false;
+
         curFrameNum = oriId;
         curTime = oriId;
     }
 
+    public boolean realIsValid() {
+        if (precise && realBmp != null && curFrameNum >= 0) {
+            return true;
+        }
+        return false;
+    }
+
+    public boolean thisDrawing = false;
+
     public int showIndex = 0;
 
+
+    public int tmpFrameNum;
+    public double tmpTime;
     public Bitmap tmpBmp;
+
+    public boolean tmpIsValid() {
+        if (tmpBmp != null && tmpFrameNum >= 0) {
+            return true;
+        }
+        return false;
+    }
+
+    /*public void tmpSetRealData(ThumbCell from) {
+        tmpBmp = from.realBmp;
+        tmpFrameNum = from.curFrameNum;
+        tmpTime = from.curTime;
+    }*/
+    public void tmpSetRealData() {
+        tmpBmp = this.realBmp;
+        tmpFrameNum = this.curFrameNum;
+        tmpTime = this.curTime;
+    }
+
+    public void tmpSetTmpData(ThumbCell from) {
+        tmpBmp = from.tmpBmp;
+        tmpFrameNum = from.tmpFrameNum;
+        tmpTime = from.tmpTime;
+    }
 
 
     private RectF drawRect = new RectF();

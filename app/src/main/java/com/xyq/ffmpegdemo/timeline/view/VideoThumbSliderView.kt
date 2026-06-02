@@ -47,6 +47,8 @@ class VideoThumbSliderView @JvmOverloads constructor(
     private val config = TimelineConfig()
     private var contentScrollX = 0
     private var viewportWidthPx = 0
+    /** 可见区 / 时间轴配置变化时为 true；仅 invalidate 画 Bitmap 时不重建，避免 onDraw 里重复重算 */
+    private var contentDirty = true
 
 
     private val preciseThumbnails = object : LruCache<Int, Bitmap>(DEFAULT_CACHE_SIZE) {
@@ -91,6 +93,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
     var tmpDrawMap : HashMap<Int, ThumbCell?> = HashMap()
     val tmpDrawBean:ArrayList<DrawBean> = ArrayList()
     val drawThumbCellList:ArrayList<ThumbCell?> = ArrayList()
+    val oriThumbCellList:ArrayList<ThumbCell> = ArrayList()
 
     var totalShowNum = 5
 
@@ -107,6 +110,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 val cell = ThumbCell(cellWidth.toFloat(),cellHeight.toFloat(),id)
                 thumbCellList.add(cell)
                 drawThumbCellList.add(cell)
+                oriThumbCellList.add(cell)
                 curDrawMap[id] = cell
                 tmpDrawBean.add(DrawBean(0,0.0,0f))
             }
@@ -132,7 +136,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
         config.durationSec = timeline.durationSec
         config.majorTickSpacingPx = timeline.majorTickSpacingPx
         config.pxPerSecond = timeline.pxPerSecond
-        changeDrawContent()
+        markContentDirty()
         requestLayout()
         invalidate()
     }
@@ -141,7 +145,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
         val sx = scrollX.coerceAtLeast(0)
         if (contentScrollX != sx) {
             contentScrollX = sx
-            changeDrawContent()
+            markContentDirty()
             invalidate()
         }
     }
@@ -149,17 +153,30 @@ class VideoThumbSliderView @JvmOverloads constructor(
     fun setViewportWidthPx(width: Int) {
         if (viewportWidthPx != width) {
             viewportWidthPx = width
-            changeDrawContent()
+            markContentDirty()
             invalidate()
         }
     }
 
+    private fun markContentDirty() {
+        contentDirty = true
+        ///ensureDrawContentUpdated()
+    }
 
-//    val firstIndex = -1
-//    val lastIndex = -1
+    /** 首屏或仅 invalidate 时，在绘制前补一次可见区绑定；缩略图回调 invalidate 不会触发 */
+    private fun ensureDrawContentUpdated() {
+        if (!contentDirty) return
+        if (config.durationSec <= 0 || config.gridCellWidthPx <= 0) return
+        changeDrawContent()
+        contentDirty = false
+    }
 
-    fun changeDrawContent111() {
-
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w != oldw || h != oldh) {
+            markContentDirty()
+            invalidate()
+        }
     }
 
 
@@ -197,7 +214,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
             // 以 cell 上 setTimeId 写入的为准，避免闭包里的 curTime/curFrameNum 与 dequeue 到的 cell 不一致
             val frameNum = cell.curFrameNum
             val timeSec = cell.curTime
-            val precise = if (mPlayer?.isPlaying() == true) {
+            val precise = if (mPlayer?.isPlaying() == true &&false ) {
                 false
             } else {
                 true
@@ -207,8 +224,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 width = cell.width.toInt(),
                 height = cell.height.toInt(),
                 timestampSec = timeSec,
-//                precise = precise,
-                precise = true,
+                precise = precise,
             )
             mHandler.post {
                 bmp?.let {
@@ -265,10 +281,12 @@ class VideoThumbSliderView @JvmOverloads constructor(
         )
         for (i in 0 until drawThumbCellList.size) {
             drawThumbCellList[i] = null
+            oriThumbCellList[i].thisDrawing = false
         }
 
         var lastFrameNum = -1
         var startIndex = -1
+        val drawNumber = finalLastIndex - firstIndex + 1
 
         for (i in firstIndex.. finalLastIndex) {
             startIndex++
@@ -278,7 +296,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
             val leftFrameNum = ((tmpCurTime - seconds) * TimelineConstants.NOMINAL_FPS).toInt()
             val curTime = seconds + leftFrameNum / TimelineConstants.NOMINAL_FPS
             var curFrameNum = seconds * TimelineConstants.FRAMES_PER_SEC + leftFrameNum
-            ///var curFrameNum = (curTime * TimelineConstants.NOMINAL_FPS).toInt()
 
             if (curFrameNum <= lastFrameNum) {
                 curFrameNum = lastFrameNum + 1
@@ -292,10 +309,10 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     +" curFrameNum:"+curFrameNum
                     +" curTime:"+curTime
             )
-//            val target = curDrawMap.remove(curFrameNum)
             val target = curDrawMap[curFrameNum]
             if (target != null) {
                 target.setDrawX(left)
+                target.thisDrawing = true
                 curDrawMap[curFrameNum] = null
                 tmpDrawMap[curFrameNum] = target
                 drawThumbCellList[startIndex] = target
@@ -303,13 +320,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
                 val bean = tmpDrawBean[startIndex]
                 bean.setData(curFrameNum,curTime.toDouble(),left)
                 leftList.add(bean)
-            }
-
-            if (false) {
-                //            val right = left + cellW
-                val paint = if (i and 1 == 0) cellPaint else cellAltPaint
-//                canvas.drawRect(left, 0f, right, h, paint)
-//                canvas.drawRect(left, 0f, right, h, borderPaint)
             }
         }
 
@@ -319,8 +329,8 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
         var index = -1
         var indexOfWillDraw = 0
-        curDrawMap.values.forEach { thumbCell ->
-            if (thumbCell == null) {
+        oriThumbCellList.forEach { thumbCell ->
+            if (thumbCell.thisDrawing) {
                 return@forEach
             }
             index++
@@ -351,8 +361,6 @@ class VideoThumbSliderView @JvmOverloads constructor(
                             if (bitmap.isRecycled) {
                                 asyncLoadThumbnail(curFrameNum,curTime,thumbCell)
                                 noPeciseThumbnails.remove(curFrameNum)
-//                                canvas.drawRect(left, 0f, right, h, paint)
-//                                canvas.drawRect(drawRect, cellPaint)
                             } else {
                                 thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
                                 thumbCell.setBitmap(bitmap,false)
@@ -362,13 +370,12 @@ class VideoThumbSliderView @JvmOverloads constructor(
                         if (bitmap.isRecycled) {
                             asyncLoadThumbnail(curFrameNum,curTime,thumbCell)
                             preciseThumbnails.remove(curFrameNum)
-//                            canvas.drawRect(drawRect, cellPaint)
                         } else {
                             thumbCell.setTimeId(pair.curFrameNum,pair.curTime)
                             thumbCell.setBitmap(bitmap,true)
+                            thumbCell.thisDrawing = true
                         }
                     }
-
                 }
 
                 if (thumbCell.drawX == 0f){
@@ -400,29 +407,248 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     +" curDrawMap.size:"+curDrawMap.size
             )
         }
+
+        fun sortDrawBitmap(header:ThumbCell?,tailer :ThumbCell?,startIndex:Int,endIndex:Int) {
+            if (startIndex > endIndex) {
+                return
+            }
+            var lastThumbCell = header
+            if (lastThumbCell != null && tailer != null) {
+                for (i in startIndex..endIndex) {
+                    val target = drawThumbCellList[i]
+                    if (target != null) {
+                        if (target.tmpIsValid()) {
+                            if (target.tmpFrameNum > lastThumbCell!!.curFrameNum) {
+                                if (target.tmpFrameNum < tailer.curFrameNum) {
+                                    lastThumbCell = target
+                                } else {
+                                    target.tmpSetTmpData(lastThumbCell)
+                                }
+                            } else {
+                                target.tmpSetTmpData(lastThumbCell)
+                            }
+                        } else {
+                            target.tmpSetTmpData(lastThumbCell)
+                        }
+                    }
+                }
+            } else if (header == null && tailer != null) {
+                lastThumbCell = tailer
+                for (i in endIndex downTo startIndex) {
+                    val target = drawThumbCellList[i]
+                    if (target != null) {
+                        if (target.tmpIsValid()) {
+                            if (target.tmpFrameNum < lastThumbCell!!.curFrameNum) {
+                                lastThumbCell = target
+                            } else {
+                                target.tmpSetTmpData(lastThumbCell)
+                            }
+                        } else {
+                            target.tmpSetTmpData(lastThumbCell)
+                        }
+                    }
+                }
+            } else if (header != null && tailer == null) {
+                for (i in startIndex..endIndex) {
+                    val target = drawThumbCellList[i]
+                    if (target != null) {
+                        if (target.tmpIsValid()) {
+                            if (target.tmpFrameNum > lastThumbCell!!.curFrameNum) {
+                                lastThumbCell = target
+                            } else {
+                                target.tmpSetTmpData(lastThumbCell)
+                            }
+                        } else {
+                            target.tmpSetTmpData(lastThumbCell)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (true) {
+            val stringBuilder : StringBuilder = StringBuilder()
+            for (i in 0 until drawNumber) {
+                val cell = drawThumbCellList[i] ?: return
+                val realBmpIsNull = cell.realBmp == null
+                val tmpBmpIsNull = cell.tmpBmp == null
+                stringBuilder.append("{index:").append(i)
+                    .append(",realBmpIsNull:").append(realBmpIsNull)
+                    .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
+                    .append("}")
+//                    .append("\n")
+            }
+            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
+                    +" info1:"+stringBuilder.toString()
+            )
+        }
+
+
+        var lastThumbCell:ThumbCell? = null
+        var lastThumbCellIndex = -1
+        for (i in 0 until drawNumber) {
+            val cell = drawThumbCellList[i]
+            if (cell != null && cell.realIsValid()) {
+                cell.tmpSetRealData()
+                sortDrawBitmap(lastThumbCell,cell,lastThumbCellIndex+1,i-1)
+                lastThumbCell = cell
+                lastThumbCellIndex = i
+            }
+        }
+
+        if (true) {
+            val stringBuilder : StringBuilder = StringBuilder()
+            for (i in 0 until drawNumber) {
+                val cell = drawThumbCellList[i] ?: return
+                val realBmpIsNull = cell.realBmp == null
+                val tmpBmpIsNull = cell.tmpBmp == null
+                stringBuilder.append("{index:").append(i)
+                    .append(",realBmpIsNull:").append(realBmpIsNull)
+                    .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
+                    .append("}")
+//                    .append("\n")
+            }
+            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
+                    +" info2:"+stringBuilder.toString()
+            )
+        }
+
+        if (lastThumbCell != null) {
+            if (lastThumbCellIndex < drawNumber - 1) {
+                sortDrawBitmap(lastThumbCell,null,lastThumbCellIndex+1,drawNumber - 1)
+            }
+            if (true) {
+                val stringBuilder : StringBuilder = StringBuilder()
+                for (i in 0 until drawNumber) {
+                    val cell = drawThumbCellList[i] ?: return
+                    val realBmpIsNull = cell.realBmp == null
+                    val tmpBmpIsNull = cell.tmpBmp == null
+                    stringBuilder.append("{index:").append(i)
+                        .append(",realBmpIsNull:").append(realBmpIsNull)
+                        .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
+                        .append("}")
+//                    .append("\n")
+                }
+                ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
+                        +" info3:"+stringBuilder.toString()
+                )
+            }
+        } else {
+            lastThumbCell = null
+            lastThumbCellIndex = -1
+            for (i in 0 until drawNumber) {
+                if (drawThumbCellList[i]?.tmpIsValid() == true) {
+                    lastThumbCell = drawThumbCellList[i]
+                    if ((lastThumbCellIndex+1) < i) {
+                        for (j in (lastThumbCellIndex+1) until i) {
+                            drawThumbCellList[j]?.tmpSetTmpData(lastThumbCell)
+                        }
+                    }
+                    lastThumbCellIndex = i
+                }
+            }
+            if (true) {
+                val stringBuilder : StringBuilder = StringBuilder()
+                for (i in 0 until drawNumber) {
+                    val cell = drawThumbCellList[i] ?: return
+                    val realBmpIsNull = cell.realBmp == null
+                    val tmpBmpIsNull = cell.tmpBmp == null
+                    stringBuilder.append("{index:").append(i)
+                        .append(",realBmpIsNull:").append(realBmpIsNull)
+                        .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
+                        .append("}")
+//                    .append("\n")
+                }
+                ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
+                        +" info4:"+stringBuilder.toString()
+                )
+            }
+            if (lastThumbCell != null) {
+                if (lastThumbCellIndex < drawNumber - 1) {
+                    for (j in (lastThumbCellIndex+1) until drawNumber) {
+                        drawThumbCellList[j]?.tmpSetTmpData(lastThumbCell)
+                    }
+                }
+            } else {
+                ALog.e("-260531p1q-VideoThumbSliderView-onDraw-91 lastThumbCell==null"
+                        +" TotalShowNum:"+totalShowNum
+                )
+            }
+        }
+
+
+        if (true) {
+            val stringBuilder : StringBuilder = StringBuilder()
+            for (i in 0 until drawNumber) {
+                val cell = drawThumbCellList[i] ?: return
+                val realBmpIsNull = cell.realBmp == null
+                val tmpBmpIsNull = cell.tmpBmp == null
+                stringBuilder.append("{index:").append(i)
+                    .append(",realBmpIsNull:").append(realBmpIsNull)
+                    .append(",tmpBmpIsNull:").append(tmpBmpIsNull)
+                    .append("}")
+//                    .append("\n")
+            }
+            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-drawThumbCellList"
+                    +" info5:"+stringBuilder.toString()
+            )
+        }
+
+
+        if (true) {
+            var lastFrameNum = -11
+            for (i in 0 until drawNumber) {
+                if (drawThumbCellList[i] != null) {
+                    /*if ((drawThumbCellList[i]!!.curFrameNum>=0 && drawThumbCellList[i]!!.curFrameNum >= lastFrameNum)) {
+                        lastFrameNum = drawThumbCellList[i]!!.curFrameNum
+                        if ((drawThumbCellList[i]!!.tmpFrameNum>=0 && drawThumbCellList[i]!!.tmpFrameNum >= lastFrameNum)) {
+                            lastFrameNum = drawThumbCellList[i]!!.tmpFrameNum
+                        } else {
+                            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-92 not sort"
+                                    +" drawNumber:"+drawNumber
+                            )
+                        }
+                    }*/
+
+                    if ((drawThumbCellList[i]!!.realBmp == null && drawThumbCellList[i]!!.tmpBmp == null)) {
+                        ALog.e("-260531p1q-VideoThumbSliderView-onDraw-92 bmp is null"
+                                +" drawNumber:"+drawNumber
+                        )
+                    }
+                }
+            }
+        }
+
+
+
+
+
+
+
     }
 
     @SuppressLint("DrawAllocation")
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        ensureDrawContentUpdated()
         var lastBmp: Bitmap? = null
+//        for (i in 0 until drawThumbCellList.size) {
+//            if (drawThumbCellList[i]?.realBmp != null){
+//                lastBmp = drawThumbCellList[i]?.realBmp
+//                break
+//            }
+//        }
+//        if (lastBmp == null) {
+//            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-83 (lastBmp == null)"
+//                    +" TotalShowNum:"+totalShowNum
+//            )
+//        }
         for (i in 0 until drawThumbCellList.size) {
-            if (drawThumbCellList[i]?.realBmp != null){
-                lastBmp = drawThumbCellList[i]?.realBmp
-                break
-            }
-        }
-        if (lastBmp == null) {
-            ALog.e("-260531p1q-VideoThumbSliderView-onDraw-83 (lastBmp == null)"
-                    +" TotalShowNum:"+totalShowNum
-            )
-        }
-        for (i in 0 until drawThumbCellList.size) {
-            if (drawThumbCellList[i]?.realBmp != null){
-                lastBmp = drawThumbCellList[i]?.realBmp
-            } else {
-                drawThumbCellList[i]?.tmpBmp = lastBmp
-            }
+//            if (drawThumbCellList[i]?.realBmp != null){
+//                lastBmp = drawThumbCellList[i]?.realBmp
+//            } else {
+//                drawThumbCellList[i]?.tmpBmp = lastBmp
+//            }
             drawThumbCellList[i]?.drawSelf(canvas)
         }
     }
