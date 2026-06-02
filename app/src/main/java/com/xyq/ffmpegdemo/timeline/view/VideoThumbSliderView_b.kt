@@ -205,7 +205,7 @@ class VideoThumbSliderView_b @JvmOverloads constructor(
             val bmp = FFMpegUtils.getSingleFrame(
                 ptr = ptrOfVideoThumb,
                 width = cell.width.toInt(),
-                height = cell.width.toInt(),
+                height = cell.height.toInt(),
                 timestampSec = timeSec,
 //                precise = precise,
                 precise = true,
