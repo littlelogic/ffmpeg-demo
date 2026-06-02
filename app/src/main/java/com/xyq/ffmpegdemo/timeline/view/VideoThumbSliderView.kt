@@ -418,8 +418,8 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     val target = drawThumbCellList[i]
                     if (target != null) {
                         if (target.tmpIsValid()) {
-                            if (target.tmpFrameNum > lastThumbCell!!.curFrameNum) {
-                                if (target.tmpFrameNum < tailer.curFrameNum) {
+                            if (target.tmpFrameNum > lastThumbCell!!.tmpFrameNum) {
+                                if (target.tmpFrameNum < tailer.tmpFrameNum) {
                                     lastThumbCell = target
                                 } else {
                                     target.tmpSetTmpData(lastThumbCell)
@@ -438,7 +438,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     val target = drawThumbCellList[i]
                     if (target != null) {
                         if (target.tmpIsValid()) {
-                            if (target.tmpFrameNum < lastThumbCell!!.curFrameNum) {
+                            if (target.tmpFrameNum < lastThumbCell!!.tmpFrameNum) {
                                 lastThumbCell = target
                             } else {
                                 target.tmpSetTmpData(lastThumbCell)
@@ -453,7 +453,7 @@ class VideoThumbSliderView @JvmOverloads constructor(
                     val target = drawThumbCellList[i]
                     if (target != null) {
                         if (target.tmpIsValid()) {
-                            if (target.tmpFrameNum > lastThumbCell!!.curFrameNum) {
+                            if (target.tmpFrameNum > lastThumbCell!!.tmpFrameNum) {
                                 lastThumbCell = target
                             } else {
                                 target.tmpSetTmpData(lastThumbCell)
