@@ -15,6 +15,7 @@ import com.badlogic.utils.ALog
 import com.badlogic.utils.Tools
 import com.xyq.ffmpegdemo.R
 import com.xyq.ffmpegdemo.player.MyPlayer
+import com.xyq.ffmpegdemo.timeline.BothSidesBlankMode
 import com.xyq.ffmpegdemo.timeline.ThumbCell
 import com.xyq.ffmpegdemo.timeline.TimelineConfig
 import com.xyq.ffmpegdemo.timeline.TimelineConstants
@@ -182,10 +183,16 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         var w = config.contentWidthPx
-        customHorizontalScrollView?.let {
-            w += it.width
-            startBlank = it.width/2
+        startBlank = 0
+        if (TimelineConstants.bothSidesBlankMode == BothSidesBlankMode.fixed) {
+            TimelineConstants.bothSidesBlankPx
+        } else {
+            customHorizontalScrollView?.let {
+                startBlank = it.width/2
+            }
         }
+        w += (startBlank * 2)
+
         val widthSpec = if (w > 0) {
             MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY)
         } else {

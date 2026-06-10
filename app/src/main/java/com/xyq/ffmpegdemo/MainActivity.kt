@@ -35,6 +35,7 @@ import com.xyq.ffmpegdemo.player.IMediaPlayer
 import com.xyq.ffmpegdemo.player.IMediaPlayerStatusListener
 import com.xyq.ffmpegdemo.player.MyPlayer
 import com.xyq.ffmpegdemo.player.PlayerConfig
+import com.xyq.ffmpegdemo.timeline.BothSidesBlankMode
 import com.xyq.ffmpegdemo.timeline.TimelineConstants
 import com.xyq.ffmpegdemo.timeline.view.CustomHorizontalScrollView
 import com.xyq.ffmpegdemo.viewmodel.PlayViewModel
@@ -581,9 +582,17 @@ class MainActivity : AppCompatActivity() {
         mBinding.videoThumbSliderView.setTimelineConfig(mTimelineConfig)
     }
 
+    var headBlank:Int? = null
+
     private fun applyTimelineLayout() {
+        if (TimelineConstants.bothSidesBlankMode == BothSidesBlankMode.fixed) {
+            headBlank = TimelineConstants.bothSidesBlankPx
+        } else {
+            headBlank = mBinding.trackScrollView.width/2
+        }
+
         val contentW = mTimelineConfig.contentWidthPx.coerceAtLeast(1)
-        mBinding.trackContent.layoutParams.width = contentW + mBinding.trackScrollView.width
+        mBinding.trackContent.layoutParams.width = contentW + (headBlank?:0) * 2
         mBinding.trackContent.requestLayout()
         mBinding.trackContentView.requestLayout()
     }
@@ -620,9 +629,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateTimelineScrollOffset() {
 //        val headerW = trackHeaderWidthPx()
-        val headerW = mBinding.trackScrollView.width/2
+        val headerW = headBlank?:0
         val scrollX = mBinding.trackScrollView.scrollX
-        val viewportW = mBinding.trackScrollView.width
+        val viewportW = mBinding.trackScrollView.width /*- 2 * headerW*/
         val contentWidthPx = mTimelineConfig.contentWidthPx.coerceAtLeast(0)
         val (visibleLeft, visibleRight) = computeTimelineVisibleRange(
             scrollX, viewportW, headerW, contentWidthPx,

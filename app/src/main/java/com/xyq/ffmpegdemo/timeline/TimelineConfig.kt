@@ -1,5 +1,6 @@
 package com.xyq.ffmpegdemo.timeline
 
+import com.badlogic.utils.Tools
 import kotlin.math.ceil
 
 /**
@@ -26,6 +27,14 @@ object TimelineConstants {
     const val MIN_SEC_SPAN_DIVISOR = 10f
     /** 1 秒最大像素 = cellWidth * MAX_SEC_SPAN_MULTIPLIER（1 帧 = 1 格宽） */
     const val MAX_SEC_SPAN_MULTIPLIER = 30f
+
+    val bothSidesBlankMode = BothSidesBlankMode.fit
+    val bothSidesBlankPx = Tools.dip2px(Tools.getApplication(),50f)
+}
+
+public enum class BothSidesBlankMode {
+    fixed,
+    fit
 }
 
 class TimelineConfig(
