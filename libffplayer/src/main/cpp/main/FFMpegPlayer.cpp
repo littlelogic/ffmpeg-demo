@@ -419,6 +419,13 @@ void FFMpegPlayer::drainWillSeekPointsList() {
 }
 
 void FFMpegPlayer::applySeekInternal(double timeS) {
+    // 播放状态下 seek 时临时冻结时钟，减少音频线程对 MediaClock 的锁竞争，
+    // 并跳过等待 audio flush，与 PAUSE 下 seek 等效。seek 完成后恢复时钟。
+    bool wasPlaying = (mPlayerState == PlayerState::PLAYING);
+    if (wasPlaying && mMediaClock) {
+        mMediaClock->pause();
+    }
+
     // seek 之后两条流都重新开始消费 packet，先把 EOF 标志清掉。
     {
         std::lock_guard<std::mutex> lk(mEofMutex);
@@ -439,7 +446,7 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
     }
     if (mAudioPacketQueue != nullptr) {
         mAudioPacketQueue->clear();
-        // 仍通知音频解码线程 flush；PAUSE 时 apply 不等待 audio（见下方 wait）。
+        // 仍通知音频解码线程 flush；不等待 audio flush 完成，由音频线程异步处理。
         mAudioSeekPos.store(timeS);
         mAudioPacketQueue->notify();
     }
@@ -485,13 +492,12 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
              timeS, refStreamIdx, mFtx)
     }
 
+    // 只等待 video decoder 完成 flush，audio 由其自身线程异步完成。
     int waitRounds = 0;
-    static const int kSeekFlushMaxRounds = 400;  // 约 2s（5ms * 400），避免读包线程永久卡死
+    static const int kSeekFlushMaxRounds = 400;// 约 2s（5ms * 400），避免读包线程永久卡死
     while (true) {
         bool videoPending = mVideoDecoder != nullptr && mVideoSeekPos.load() >= 0;
-        bool audioPending = mPlayerState != PlayerState::PAUSE
-                            && mAudioDecoder != nullptr && mAudioSeekPos.load() >= 0;
-        if (!videoPending && !audioPending) {
+        if (!videoPending) {
             break;
         }
         if (++waitRounds > kSeekFlushMaxRounds) {
@@ -511,8 +517,8 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
             break;
         }
         if (waitRounds % 20 == 1) {
-            LOGI("seek wait for decoder flush...pause=%d mVideoSeekPos: %f, mAudioSeekPos: %f",
-                 mPlayerState == PlayerState::PAUSE, mVideoSeekPos.load(), mAudioSeekPos.load())
+            LOGI("seek wait for decoder flush...videoSeekPos: %f, audioSeekPos: %f",
+                 mVideoSeekPos.load(), mAudioSeekPos.load())
         }
         if (mVideoPacketQueue != nullptr) {
             mVideoPacketQueue->notify();
@@ -523,7 +529,19 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
         mMutexObj->wakeUp();
         usleep(5000);
     }
-    LOGW("FFMpegPlayer::applySeekInternal done, timeS=%f", timeS)
+
+    // 播放状态下恢复时钟，重置锚点确保音视频从 seek 目标位置干净启动。
+    if (wasPlaying && mMediaClock) {
+        mMediaClock->resume();
+        if (mVideoDecoder) {
+            mVideoDecoder->needFixStartTime();
+        }
+        if (mAudioDecoder) {
+            mAudioDecoder->needFixStartTime();
+        }
+    }
+
+    LOGW("FFMpegPlayer::applySeekInternal done, timeS=%f wasPlaying=%d", timeS, wasPlaying)
 }
 
 void FFMpegPlayer::prefetchPauseVideoFrame() {
