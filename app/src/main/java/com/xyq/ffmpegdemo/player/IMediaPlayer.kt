@@ -21,6 +21,10 @@ interface IMediaPlayer {
 
     fun seek(position: Double): Boolean
 
+    fun seekAndPause(position: Double): Boolean = seek(position)
+
+    fun seekAndPlay(position: Double): Boolean = seek(position)
+
     fun setMute(mute: Boolean)
 
     fun getDuration(): Double

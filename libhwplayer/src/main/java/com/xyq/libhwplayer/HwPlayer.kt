@@ -67,6 +67,16 @@ class HwPlayer: IPlayer {
         return true
     }
 
+    override fun seekAndPause(position: Double): Boolean {
+        Log.i(TAG, "seekAndPause: ")
+        return true
+    }
+
+    override fun seekAndPlay(position: Double): Boolean {
+        Log.i(TAG, "seekAndPlay: ")
+        return true
+    }
+
     override fun setMute(mute: Boolean) {
         Log.i(TAG, "setMute: ")
     }

@@ -130,6 +130,28 @@ Java_com_xyq_libffplayer_FFPlayer_nativeSeek(JNIEnv *env, jobject thiz, jlong ha
     return player->seek(position);
 }
 
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_xyq_libffplayer_FFPlayer_nativeSeekAndPause(JNIEnv *env, jobject thiz, jlong handle,
+                                                     jdouble position) {
+    auto *player = reinterpret_cast<FFMpegPlayer *>(handle);
+    if (player == nullptr) {
+        return false;
+    }
+    return player->seekAndPause(position);
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_xyq_libffplayer_FFPlayer_nativeSeekAndPlay(JNIEnv *env, jobject thiz, jlong handle,
+                                                    jdouble position) {
+    auto *player = reinterpret_cast<FFMpegPlayer *>(handle);
+    if (player == nullptr) {
+        return false;
+    }
+    return player->seekAndPlay(position);
+}
+
 /**
  * @brief 设置静音状态
  */

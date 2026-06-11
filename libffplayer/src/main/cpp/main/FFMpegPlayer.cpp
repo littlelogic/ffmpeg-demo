@@ -373,17 +373,18 @@ void FFMpegPlayer::ReadPacketLoop() {
             LOGW("FFMpegPlayer::ReadPacketLoop wait")
             mMutexObj->wait();
             LOGW("FFMpegPlayer::ReadPacketLoop wakeup")
-            // double check stop state
-            // or check pause state for pause & seek
 
-            // PAUSE 下 seek 只入 willSeekPointsList；wakeUp 后消费队列并预取一帧视频预览（无声）。
             drainWillSeekPointsList();
-            prefetchPauseVideoFrame();
             continue;
         }
 
         // 每轮读包前先消费 seek 队列（取最新、合并连击 seek）。
         drainWillSeekPointsList();
+
+        // SEEK_AND_PAUSE 会将状态改为 PAUSE，此时不继续读包，回到循环顶部进入 wait。
+        if (mPlayerState == PlayerState::PAUSE) {
+            continue;
+        }
 
         // read packet to queue
         updatePlayerState(PlayerState::PLAYING);
@@ -398,29 +399,28 @@ void FFMpegPlayer::ReadPacketLoop() {
     LOGI("FFMpegPlayer::ReadPacketLoop end")
 }
 
-double FFMpegPlayer::takeLatestSeekPoint() {
+FFMpegPlayer::SeekRequest FFMpegPlayer::takeLatestSeekPoint() {
     std::lock_guard<std::mutex> lk222(mWillSeekMutex);
     if (mWillSeekPointsList.empty()) {
-        return kSeekPosUnset;
+        return {kSeekPosUnset, SEEK_DEFAULT};
     }
-    double latest = mWillSeekPointsList.back();
+    SeekRequest latest = mWillSeekPointsList.back();
     mWillSeekPointsList.clear();
     return latest;
 }
 
 void FFMpegPlayer::drainWillSeekPointsList() {
-    double timeS = takeLatestSeekPoint();
-    if (timeS < 0) {
+    SeekRequest req = takeLatestSeekPoint();
+    if (req.timeS < 0) {
         return;
     }
-    LOGW("FFMpegPlayer::drainWillSeekPointsList apply latest=%f", timeS)
-    applySeekInternal(timeS);
-    // 每轮只处理一次 seek，本轮继续读包；若 apply 期间 UI 又入队，下轮再 drain。
+    LOGW("FFMpegPlayer::drainWillSeekPointsList apply latest=%f mode=%d", req.timeS, req.mode)
+    applySeekInternal(req.timeS, req.mode);
 }
 
-void FFMpegPlayer::applySeekInternal(double timeS) {
+void FFMpegPlayer::applySeekInternal(double timeS, SeekMode mode) {
     // 播放状态下 seek 时临时冻结时钟，减少音频线程对 MediaClock 的锁竞争，
-    // 并跳过等待 audio flush，与 PAUSE 下 seek 等效。seek 完成后恢复时钟。
+    // 并跳过等待 audio flush，与 PAUSE 下 seek 等效。
     bool wasPlaying = (mPlayerState == PlayerState::PLAYING);
     if (wasPlaying && mMediaClock) {
         mMediaClock->pause();
@@ -530,18 +530,42 @@ void FFMpegPlayer::applySeekInternal(double timeS) {
         usleep(5000);
     }
 
-    // 播放状态下恢复时钟，重置锚点确保音视频从 seek 目标位置干净启动。
-    if (wasPlaying && mMediaClock) {
-        mMediaClock->resume();
+    // 根据 SeekMode 决定 seek 后的最终状态
+    bool shouldPlay = false;
+    bool shouldPause = false;
+    switch (mode) {
+        case SEEK_AND_PAUSE:
+            shouldPause = true;
+            break;
+        case SEEK_AND_PLAY:
+            shouldPlay = true;
+            break;
+        case SEEK_DEFAULT:
+        default:
+            // 恢复 seek 前的状态
+            shouldPlay = wasPlaying;
+            shouldPause = !wasPlaying;
+            break;
+    }
+
+    if (shouldPlay) {
+        if (mMediaClock) {
+            mMediaClock->resume();
+        }
+        updatePlayerState(PlayerState::PLAYING);
         if (mVideoDecoder) {
             mVideoDecoder->needFixStartTime();
         }
         if (mAudioDecoder) {
             mAudioDecoder->needFixStartTime();
         }
+    } else if (shouldPause) {
+        // 时钟在入口处已 pause（wasPlaying 时）或本来就是 pause 状态，无需再操作时钟。
+        updatePlayerState(PlayerState::PAUSE);
+        prefetchPauseVideoFrame();
     }
 
-    LOGW("FFMpegPlayer::applySeekInternal done, timeS=%f wasPlaying=%d", timeS, wasPlaying)
+    LOGW("FFMpegPlayer::applySeekInternal done, timeS=%f mode=%d wasPlaying=%d", timeS, mode, wasPlaying)
 }
 
 void FFMpegPlayer::prefetchPauseVideoFrame() {
@@ -1062,14 +1086,48 @@ double FFMpegPlayer::getDuration() {
  *          demuxer seek、清队列、主时钟等在 drainWillSeekPointsList → applySeekInternal 中执行。
  */
 bool FFMpegPlayer::seek(double timeS) {
-    LOGI("260527seek enqueue seek: %f, player state: %d", timeS, mPlayerState)
+    LOGI("260527seek enqueue seek: %f, player state: %d, mode: DEFAULT", timeS, mPlayerState)
     {
         std::lock_guard<std::mutex> lk(mWillSeekMutex);
-        // 高频拖动只保留最新目标，避免列表无限增长。
+        SeekRequest req{timeS, SEEK_DEFAULT};
         if (mWillSeekPointsList.empty()) {
-            mWillSeekPointsList.push_back(timeS);
+            mWillSeekPointsList.push_back(req);
         } else {
-            mWillSeekPointsList.back() = timeS;
+            mWillSeekPointsList.back() = req;
+        }
+    }
+    if (mMutexObj) {
+        mMutexObj->wakeUp();
+    }
+    return true;
+}
+
+bool FFMpegPlayer::seekAndPause(double timeS) {
+    LOGI("260527seek enqueue seek: %f, player state: %d, mode: PAUSE", timeS, mPlayerState)
+    {
+        std::lock_guard<std::mutex> lk(mWillSeekMutex);
+        SeekRequest req{timeS, SEEK_AND_PAUSE};
+        if (mWillSeekPointsList.empty()) {
+            mWillSeekPointsList.push_back(req);
+        } else {
+            mWillSeekPointsList.back() = req;
+        }
+    }
+    if (mMutexObj) {
+        mMutexObj->wakeUp();
+    }
+    return true;
+}
+
+bool FFMpegPlayer::seekAndPlay(double timeS) {
+    LOGI("260527seek enqueue seek: %f, player state: %d, mode: PLAY", timeS, mPlayerState)
+    {
+        std::lock_guard<std::mutex> lk(mWillSeekMutex);
+        SeekRequest req{timeS, SEEK_AND_PLAY};
+        if (mWillSeekPointsList.empty()) {
+            mWillSeekPointsList.push_back(req);
+        } else {
+            mWillSeekPointsList.back() = req;
         }
     }
     if (mMutexObj) {

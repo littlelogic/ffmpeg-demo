@@ -266,6 +266,24 @@ class MyPlayer(private val mContext: Context,
         return mProxy!!.seek(position)
     }
 
+    override fun seekAndPause(position: Double): Boolean {
+        if (mState < State.PREPARE || mState >= State.STOP) {
+            return false
+        }
+
+        mIsPlayComplete = false
+        return mProxy!!.seekAndPause(position)
+    }
+
+    override fun seekAndPlay(position: Double): Boolean {
+        if (mState < State.PREPARE || mState >= State.STOP) {
+            return false
+        }
+
+        mIsPlayComplete = false
+        return mProxy!!.seekAndPlay(position)
+    }
+
     override fun setMute(mute: Boolean) {
         if (mState < State.PREPARE || mState >= State.STOP) {
             return

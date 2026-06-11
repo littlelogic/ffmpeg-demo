@@ -50,6 +50,14 @@ class FFPlayer: IPlayer {
         return nativeSeek(mNativePtr, position)
     }
 
+    override fun seekAndPause(position: Double): Boolean {
+        return nativeSeekAndPause(mNativePtr, position)
+    }
+
+    override fun seekAndPlay(position: Double): Boolean {
+        return nativeSeekAndPlay(mNativePtr, position)
+    }
+
     override fun setMute(mute: Boolean) {
         nativeSetMute(mNativePtr, mute)
     }
@@ -98,6 +106,10 @@ class FFPlayer: IPlayer {
     private external fun nativeInit(): Long
 
     private external fun nativeSeek(handle: Long, position: Double): Boolean
+
+    private external fun nativeSeekAndPause(handle: Long, position: Double): Boolean
+
+    private external fun nativeSeekAndPlay(handle: Long, position: Double): Boolean
 
     private external fun nativeSetMute(handle: Long, mute: Boolean)
 

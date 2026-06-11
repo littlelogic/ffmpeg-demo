@@ -86,6 +86,12 @@ enum PlayerState {
     STOP        ///< 停止
 };
 
+enum SeekMode {
+    SEEK_DEFAULT,    ///< 保持当前状态（播放中seek后继续播放，暂停中seek后保持暂停）
+    SEEK_AND_PAUSE,  ///< seek 完成后切到暂停状态
+    SEEK_AND_PLAY,   ///< seek 完成后切到播放状态
+};
+
 /**
  * @brief 播放器核心引擎类
  * @details 封装 FFmpeg 的完整播放流程，管理三个工作线程：
@@ -122,7 +128,9 @@ public:
     void stop();        ///< 停止播放（释放所有资源和线程）
 
     void setMute(bool mute);           ///< 设置静音
-    bool seek(double timeS);           ///< Seek 到指定时间（秒）
+    bool seek(double timeS);           ///< Seek 到指定时间（秒），保持当前状态
+    bool seekAndPause(double timeS);   ///< Seek 到指定时间后暂停
+    bool seekAndPlay(double timeS);    ///< Seek 到指定时间后播放
     double getDuration();              ///< 获取时长（秒）
     int getRotate();                   ///< 获取视频旋转角度
     void getMediaInfo(std::string &info); ///< 获取媒体信息（JSON）
@@ -154,9 +162,13 @@ private:
     std::atomic<double> mVideoSeekPos{kSeekPosUnset}; ///< 视频 Seek 目标位置（秒，decode 线程清零）
     std::atomic<double> mAudioSeekPos{kSeekPosUnset}; ///< 音频 Seek 目标位置（秒，decode 线程清零）
 
-    // UI 只往此列表追加 seek 时间；ReadPacketLoop 取最新并清空后执行 demuxer seek（合并连击 seek）。
+    // UI 只往此列表追加 seek 请求；ReadPacketLoop 取最新并清空后执行 demuxer seek（合并连击 seek）。
     mutable std::mutex mWillSeekMutex;
-    std::vector<double> mWillSeekPointsList;
+    struct SeekRequest {
+        double timeS;
+        SeekMode mode;
+    };
+    std::vector<SeekRequest> mWillSeekPointsList;
 
     std::thread *mReadPacketThread = nullptr;        ///< 读包线程
 
@@ -197,9 +209,9 @@ private:
 
     /**
      * @brief 从 willSeekPointsList 取出最新目标并清空列表（加锁）
-     * @return 最新 seek 秒数；列表为空返回 kSeekPosUnset
+     * @return 最新 seek 请求；列表为空返回 {kSeekPosUnset, SEEK_DEFAULT}
      */
-    double takeLatestSeekPoint();
+    SeekRequest takeLatestSeekPoint();
 
     bool haveNewSeekPoint() const;
 
@@ -211,10 +223,10 @@ private:
     void drainWillSeekPointsList();
 
     /**
-     * @brief 执行单次 seek（清队列、主时钟、avformat_seek_file、等解码 flush）
+     * @brief 执行单次 seek（清队列、主时钟、avformat_seek_file、等解码 flush、状态切换）
      * @details 仅 ReadPacketLoop 调用
      */
-    void applySeekInternal(double timeS);
+    void applySeekInternal(double timeS, SeekMode mode);
 
     /** @brief PAUSE 状态下 seek 后读包，直到解码并渲染一帧视频（不读音频） */
     void prefetchPauseVideoFrame();
