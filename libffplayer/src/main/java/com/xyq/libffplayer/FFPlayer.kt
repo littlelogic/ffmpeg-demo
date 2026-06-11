@@ -59,7 +59,18 @@ class FFPlayer: IPlayer {
     }
 
     override fun setMute(mute: Boolean) {
+        if (mNativePtr <= 0) return
         nativeSetMute(mNativePtr, mute)
+    }
+
+    override fun setPlayLimit(start: Double, end: Double) {
+        if (mNativePtr <= 0) return
+        nativeSetPlayLimit(mNativePtr, start, end)
+    }
+
+    override fun clearPlayLimit() {
+        if (mNativePtr <= 0) return
+        nativeClearPlayLimit(mNativePtr)
     }
 
     override fun getRotate(): Int {
@@ -112,6 +123,10 @@ class FFPlayer: IPlayer {
     private external fun nativeSeekAndPlay(handle: Long, position: Double): Boolean
 
     private external fun nativeSetMute(handle: Long, mute: Boolean)
+
+    private external fun nativeSetPlayLimit(handle: Long, startTimeS: Double, endTimeS: Double)
+
+    private external fun nativeClearPlayLimit(handle: Long)
 
     private external fun nativePrepare(handle: Long, path: String, surface: Surface?): Boolean
 

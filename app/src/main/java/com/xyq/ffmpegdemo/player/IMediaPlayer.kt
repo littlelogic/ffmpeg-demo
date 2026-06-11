@@ -27,6 +27,10 @@ interface IMediaPlayer {
 
     fun setMute(mute: Boolean)
 
+    fun setPlayLimit(start: Double, end: Double) {}
+
+    fun clearPlayLimit() {}
+
     fun getDuration(): Double
 
     fun isPlayComplete(): Boolean

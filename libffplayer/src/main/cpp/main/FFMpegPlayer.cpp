@@ -14,6 +14,7 @@
 #include "FFMpegPlayer.h"
 #include "../vendor/nlohmann/json.hpp"
 #include "header/CommonUtils.h"
+#include <cmath>
 #include <unistd.h>
 
 FFMpegPlayer::FFMpegPlayer() {
@@ -225,6 +226,7 @@ bool FFMpegPlayer::prepare(JNIEnv *env, std::string &path, jobject surface) {
         // 真正"起跑"在 start() 中调用 seekTo(0) 完成，避免 prepare→start 之间空跑造成首帧丢帧。
         LOGI("MediaClock configured: syncType=%d, mediaStartMs=%" PRId64, (int) mMediaClock->getSyncType(), mediaStartMs)
 
+        normalizeStoredPlayLimit();
         updatePlayerState(PlayerState::PREPARE);
     }
 
@@ -368,6 +370,15 @@ void FFMpegPlayer::stop() {
  */
 void FFMpegPlayer::ReadPacketLoop() {
     LOGI("FFMpegPlayer::ReadPacketLoop start")
+
+    // 应用预设的播放范围：prepare 前 setPlayLimit 可能未钳位 endTime，此时 duration 已有效。
+    normalizeStoredPlayLimit();
+    double limitStart = mPlayLimitStartS.load();
+    if (limitStart > 0) {
+        LOGI("ReadPacketLoop apply pre-set play limit, seek to start=%f", limitStart)
+        applySeekInternal(limitStart, SEEK_AND_PLAY);
+    }
+
     while (mPlayerState != PlayerState::STOP) {
         if (mPlayerState == PlayerState::PAUSE) {
             LOGW("FFMpegPlayer::ReadPacketLoop wait")
@@ -747,6 +758,15 @@ void FFMpegPlayer::VideoDecodeLoop() {
             return;
         }
 
+        double limitEnd = mPlayLimitEndS.load();
+        if (limitEnd >= 0 && mVideoDecoder->getTimestamp() > limitEnd * 1000.0) {
+            if (frame->format == AV_PIX_FMT_MEDIACODEC) {
+                av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
+            }
+            handlePlayLimitEnd(env);
+            return;
+        }
+
         // ====== 同步：统一交给 VideoDecoder::avSync(基于 MediaClock) ======
         bool shouldRender = mVideoDecoder->avSync(frame);
 
@@ -865,8 +885,12 @@ void FFMpegPlayer::AudioDecodeLoop() {
 
     mAudioDecoder->setOnFrameArrived([this, env](AVFrame *frame) {
         if (!mHasAbort && mAudioDecoder) {
-            // PAUSE 预览只刷视频，不向 AudioTrack 送 PCM
             if (mPlayerState == PlayerState::PAUSE) {
+                return;
+            }
+            double limitEnd = mPlayLimitEndS.load();
+            if (limitEnd >= 0 && mAudioDecoder->getTimestamp() > limitEnd * 1000.0) {
+                handlePlayLimitEnd(env);
                 return;
             }
             mAudioDecoder->avSync(frame);
@@ -1086,6 +1110,7 @@ double FFMpegPlayer::getDuration() {
  *          demuxer seek、清队列、主时钟等在 drainWillSeekPointsList → applySeekInternal 中执行。
  */
 bool FFMpegPlayer::seek(double timeS) {
+    timeS = clampSeekTime(timeS);
     LOGI("260527seek enqueue seek: %f, player state: %d, mode: DEFAULT", timeS, mPlayerState)
     {
         std::lock_guard<std::mutex> lk(mWillSeekMutex);
@@ -1103,6 +1128,7 @@ bool FFMpegPlayer::seek(double timeS) {
 }
 
 bool FFMpegPlayer::seekAndPause(double timeS) {
+    timeS = clampSeekTime(timeS);
     LOGI("260527seek enqueue seek: %f, player state: %d, mode: PAUSE", timeS, mPlayerState)
     {
         std::lock_guard<std::mutex> lk(mWillSeekMutex);
@@ -1120,6 +1146,7 @@ bool FFMpegPlayer::seekAndPause(double timeS) {
 }
 
 bool FFMpegPlayer::seekAndPlay(double timeS) {
+    timeS = clampSeekTime(timeS);
     LOGI("260527seek enqueue seek: %f, player state: %d, mode: PLAY", timeS, mPlayerState)
     {
         std::lock_guard<std::mutex> lk(mWillSeekMutex);
@@ -1134,6 +1161,129 @@ bool FFMpegPlayer::seekAndPlay(double timeS) {
         mMutexObj->wakeUp();
     }
     return true;
+}
+
+double FFMpegPlayer::clampSeekTime(double timeS) const {
+    double limitStart = mPlayLimitStartS.load();
+    double limitEnd = mPlayLimitEndS.load();
+    if (limitStart < 0 || limitEnd < 0) {
+        return timeS;
+    }
+    if (timeS < limitStart) return limitStart;
+    if (timeS > limitEnd) return limitEnd;
+    return timeS;
+}
+
+bool FFMpegPlayer::normalizePlayLimit(double *startTimeS, double *endTimeS) {
+    if (startTimeS == nullptr || endTimeS == nullptr ||
+        !std::isfinite(*startTimeS) || !std::isfinite(*endTimeS)) {
+        return false;
+    }
+
+    if (*startTimeS < 0) {
+        *startTimeS = 0;
+    }
+
+    // duration 可能尚未就绪（prepare 前为 0），此时先保存原始 end；
+    // prepare/start 后会再次调用 normalizeStoredPlayLimit() 裁剪。
+    double duration = getDuration();
+    if (duration > 0 && *endTimeS > duration) {
+        *endTimeS = duration;
+    }
+
+    // 闭区间：[start, end]，允许 start == end 表示只允许单点。
+    return *startTimeS <= *endTimeS;
+}
+
+void FFMpegPlayer::normalizeStoredPlayLimit() {
+    double startTimeS = mPlayLimitStartS.load();
+    double endTimeS = mPlayLimitEndS.load();
+    if (startTimeS < 0 || endTimeS < 0) {
+        return;
+    }
+
+    if (!normalizePlayLimit(&startTimeS, &endTimeS)) {
+        LOGW("normalizeStoredPlayLimit invalid range, clearing: start=%f end=%f",
+             startTimeS, endTimeS)
+        clearPlayLimit();
+        return;
+    }
+
+    mPlayLimitStartS.store(startTimeS);
+    mPlayLimitEndS.store(endTimeS);
+}
+
+void FFMpegPlayer::setPlayLimit(double startTimeS, double endTimeS) {
+    if (!normalizePlayLimit(&startTimeS, &endTimeS)) {
+        LOGW("setPlayLimit invalid range: start=%f end=%f, clearing", startTimeS, endTimeS)
+        clearPlayLimit();
+        return;
+    }
+
+    LOGI("setPlayLimit start=%f end=%f duration=%f", startTimeS, endTimeS, getDuration())
+    mPlayLimitStartS.store(startTimeS);
+    mPlayLimitEndS.store(endTimeS);
+
+    if (mPlayerState < PlayerState::START) {
+        return;
+    }
+
+    // 已有 decoder 时才检查当前位置并调整
+    double curPosMs = 0;
+    if (mAudioDecoder) {
+        curPosMs = mAudioDecoder->getTimestamp();
+    } else if (mVideoDecoder) {
+        curPosMs = mVideoDecoder->getTimestamp();
+    } else {
+        return;
+    }
+    double curPosS = curPosMs / 1000.0;
+    if (curPosS < startTimeS || curPosS > endTimeS) {
+        LOGI("setPlayLimit current pos %f out of range, seek to start %f", curPosS, startTimeS)
+        seek(startTimeS);
+    }
+}
+
+void FFMpegPlayer::clearPlayLimit() {
+    LOGI("clearPlayLimit")
+    mPlayLimitStartS.store(-1.0);
+    mPlayLimitEndS.store(-1.0);
+}
+
+void FFMpegPlayer::handlePlayLimitEnd(JNIEnv *env) {
+    bool expected = false;
+    if (!mPlayCompletedNotified.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
+    if (mMediaClock) {
+        mMediaClock->pause();
+    }
+    updatePlayerState(PlayerState::PAUSE);
+    mPauseVideoPreviewRendered.store(true);
+
+    if (mVideoPacketQueue != nullptr) {
+        mVideoPacketQueue->clear();
+        mVideoPacketQueue->notify();
+    }
+    if (mAudioPacketQueue != nullptr) {
+        mAudioPacketQueue->clear();
+        mAudioPacketQueue->notify();
+    }
+    mVideoSeekPos.store(kSeekPosUnset);
+    mAudioSeekPos.store(kSeekPosUnset);
+    if (mMutexObj) {
+        mMutexObj->wakeUp();
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(mEofMutex);
+        mVideoStreamEnded = true;
+        mAudioStreamEnded = true;
+    }
+    if (mPlayerJni.isValid()) {
+        env->CallVoidMethod(mPlayerJni.instance, mPlayerJni.onPlayCompleted);
+    }
 }
 
 /**

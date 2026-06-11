@@ -131,6 +131,8 @@ public:
     bool seek(double timeS);           ///< Seek 到指定时间（秒），保持当前状态
     bool seekAndPause(double timeS);   ///< Seek 到指定时间后暂停
     bool seekAndPlay(double timeS);    ///< Seek 到指定时间后播放
+    void setPlayLimit(double startTimeS, double endTimeS); ///< 设置播放范围限制（秒）
+    void clearPlayLimit();             ///< 清除播放范围限制
     double getDuration();              ///< 获取时长（秒）
     int getRotate();                   ///< 获取视频旋转角度
     void getMediaInfo(std::string &info); ///< 获取媒体信息（JSON）
@@ -154,6 +156,10 @@ private:
     bool mAudioStreamEnded = false;                  ///< 音频流是否已解码完毕（mEofMutex 守护）
     std::atomic<bool> mPlayCompletedNotified{false}; ///< 是否已回调 onPlayCompleted（保证只通知一次）
     std::atomic<bool> mPauseVideoPreviewRendered{false}; ///< PAUSE 预取预览是否已渲染至少一帧视频
+
+    // 播放范围限制（秒），-1 表示无限制。UI 线程设置，解码线程读取。
+    std::atomic<double> mPlayLimitStartS{-1.0};
+    std::atomic<double> mPlayLimitEndS{-1.0};
 
     std::shared_ptr<MutexObj> mMutexObj = nullptr;   ///< 线程同步互斥锁
 
@@ -230,6 +236,18 @@ private:
 
     /** @brief PAUSE 状态下 seek 后读包，直到解码并渲染一帧视频（不读音频） */
     void prefetchPauseVideoFrame();
+
+    /** @brief 将 seek 目标钳位到播放范围内 */
+    double clampSeekTime(double timeS) const;
+
+    /** @brief 将播放范围裁剪为合法闭区间；duration 未就绪时只做基础校验 */
+    bool normalizePlayLimit(double *startTimeS, double *endTimeS);
+
+    /** @brief duration 就绪后重新裁剪已保存的播放范围 */
+    void normalizeStoredPlayLimit();
+
+    /** @brief 到达播放限制末尾时停止继续读包/解码，并触发完成回调 */
+    void handlePlayLimitEnd(JNIEnv *env);
 
     void updatePlayerState(PlayerState state);  ///< 更新播放器状态
     void onPlayCompleted(JNIEnv *env);          ///< 播放完成处理（已带去重）

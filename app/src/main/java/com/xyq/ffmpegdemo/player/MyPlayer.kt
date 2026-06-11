@@ -80,6 +80,10 @@ class MyPlayer(private val mContext: Context,
 
     private var mMediaInfo: MediaInfo? = null
 
+    private data class PlayLimit(val start: Double, val end: Double)
+
+    private var mPendingPlayLimit: PlayLimit? = null
+
     init {
         mGlSurfaceView.setEGLContextClientVersion(3)
         mGlSurfaceView.setRenderer(this)
@@ -209,6 +213,9 @@ class MyPlayer(private val mContext: Context,
 
         mProxy!!.init()
         mProxy!!.setPlayerListener(this)
+        mPendingPlayLimit?.let {
+            mProxy!!.setPlayLimit(it.start, it.end)
+        }
     }
 
     private fun prepareSurfaceIfNeed(config: PlayerConfig) {
@@ -290,6 +297,16 @@ class MyPlayer(private val mContext: Context,
         }
 
         mProxy!!.setMute(mute)
+    }
+
+    override fun setPlayLimit(start: Double, end: Double) {
+        mPendingPlayLimit = PlayLimit(start, end)
+        mProxy?.setPlayLimit(start, end)
+    }
+
+    override fun clearPlayLimit() {
+        mPendingPlayLimit = null
+        mProxy?.clearPlayLimit()
     }
 
     override fun start() {

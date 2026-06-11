@@ -152,6 +152,25 @@ Java_com_xyq_libffplayer_FFPlayer_nativeSeekAndPlay(JNIEnv *env, jobject thiz, j
     return player->seekAndPlay(position);
 }
 
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_xyq_libffplayer_FFPlayer_nativeSetPlayLimit(JNIEnv *env, jobject thiz, jlong handle,
+                                                     jdouble startTimeS, jdouble endTimeS) {
+    auto *player = reinterpret_cast<FFMpegPlayer *>(handle);
+    if (player != nullptr) {
+        player->setPlayLimit(startTimeS, endTimeS);
+    }
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_xyq_libffplayer_FFPlayer_nativeClearPlayLimit(JNIEnv *env, jobject thiz, jlong handle) {
+    auto *player = reinterpret_cast<FFMpegPlayer *>(handle);
+    if (player != nullptr) {
+        player->clearPlayLimit();
+    }
+}
+
 /**
  * @brief 设置静音状态
  */

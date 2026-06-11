@@ -28,6 +28,10 @@ interface IPlayer {
 
     fun setMute(mute: Boolean)
 
+    fun setPlayLimit(start: Double, end: Double) {}
+
+    fun clearPlayLimit() {}
+
     fun getRotate(): Int
 
     /**
