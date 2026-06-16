@@ -242,11 +242,16 @@ void FFMpegPlayer::start() {
     if (mPlayerState != PlayerState::PREPARE) {  // prepared failed
         return;
     }
-    // 这里才真正"起跑"主时钟：有播放范围时锚点对齐到 limitStart，避免与 demuxer 首帧错位。
+    // 这里才真正"起跑"主时钟：有播放范围时，当前位置已在范围内则保持当前位置，
+    // 否则锚点对齐到 limitStart，避免与 demuxer 首帧错位。
     if (mMediaClock) {
         int64_t anchorMs = 0;
         if (hasPlayLimit()) {
-            anchorMs = (int64_t) (mPlayLimitStartS.load() * 1000.0);
+            double currentPosS = getCurrentPositionS();
+            double anchorS = isPositionInPlayLimit(currentPosS)
+                             ? currentPosS
+                             : mPlayLimitStartS.load();
+            anchorMs = (int64_t) (anchorS * 1000.0);
         }
         mMediaClock->seekTo(anchorMs);
     }
@@ -389,9 +394,14 @@ void FFMpegPlayer::ReadPacketLoop() {
     // 应用预设的播放范围：prepare 前 setPlayLimit 可能未钳位 endTime，此时 duration 已有效。
     normalizeStoredPlayLimit();
     if (hasPlayLimit()) {
-        double limitStart = mPlayLimitStartS.load();
-        LOGI("ReadPacketLoop apply pre-set play limit, seek to start=%f", limitStart)
-        applySeekInternal(limitStart, SEEK_AND_PLAY);
+        double currentPosS = getCurrentPositionS();
+        if (!haveNewSeekPoint() && !isPositionInPlayLimit(currentPosS)) {
+            double limitStart = mPlayLimitStartS.load();
+            LOGI("ReadPacketLoop apply pre-set play limit, current=%f out of range, seek to start=%f",
+                 currentPosS, limitStart)
+            // 这是 start() 流程里的范围校正，校正后应该继续播放；不是普通 seek。普通用户 seek 仍然走 seek() / SEEK_DEFAULT，保持原状态
+            applySeekInternal(limitStart, SEEK_AND_PLAY);
+        }
     }
 
     while (mPlayerState != PlayerState::STOP) {
