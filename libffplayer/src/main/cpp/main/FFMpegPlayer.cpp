@@ -1314,7 +1314,9 @@ void FFMpegPlayer::clearPlayLimit() {
     mPlayLimitStartS.store(-1.0);
     mPlayLimitEndS.store(-1.0);
     mPlayCompletedNotified.store(false);
-    {
+    bool hadPlayLimit = hasPlayLimit();
+    if (hadPlayLimit) {
+        mPlayCompletedNotified.store(false);
         std::lock_guard<std::mutex> lk(mEofMutex);
         mVideoStreamEnded = false;
         mAudioStreamEnded = false;
