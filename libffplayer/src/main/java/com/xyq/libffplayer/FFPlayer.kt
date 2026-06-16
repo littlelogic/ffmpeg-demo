@@ -1,12 +1,13 @@
 package com.xyq.libffplayer
 
+import android.util.Log
 import android.view.Surface
 import com.xyq.libbase.player.IPlayer
 import com.xyq.libbase.player.IPlayerListener
 
 class FFPlayer: IPlayer {
 
-    private var mNativePtr = -1L
+    private var mNativePtr = 0L
     private var mListener: IPlayerListener? = null
 
     init {
@@ -42,8 +43,9 @@ class FFPlayer: IPlayer {
     }
 
     override fun release() {
+        if (mNativePtr == 0L) return
         nativeRelease(mNativePtr)
-        mNativePtr = -1
+        mNativePtr = 0L
     }
 
     override fun seek(position: Double): Boolean {
@@ -59,17 +61,27 @@ class FFPlayer: IPlayer {
     }
 
     override fun setMute(mute: Boolean) {
-        if (mNativePtr <= 0) return
+        if (mNativePtr == 0L) return
         nativeSetMute(mNativePtr, mute)
     }
 
     override fun setPlayLimit(start: Double, end: Double) {
-        if (mNativePtr <= 0) return
+        Log.i("ww","--FFPlayer-setPlayLimit-"
+                +" mNativePtr:"+mNativePtr
+                +" start:"+start
+                +" end:"+end
+        )
+        if (mNativePtr == 0L) return
+        Log.i("ww","--FFPlayer-setPlayLimit-in"
+                +" mNativePtr:"+mNativePtr
+                +" start:"+start
+                +" end:"+end
+        )
         nativeSetPlayLimit(mNativePtr, start, end)
     }
 
     override fun clearPlayLimit() {
-        if (mNativePtr <= 0) return
+        if (mNativePtr == 0L) return
         nativeClearPlayLimit(mNativePtr)
     }
 

@@ -107,7 +107,8 @@ class MainActivity : AppCompatActivity() {
         mBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(mBinding.root)
         mPlayer = MyPlayer(applicationContext, mBinding.glSurfaceView)
-
+        mPlayer.setPlayLimit(10.0,50.0)
+        mPlayer.setMute(true)
         initViews()
         initViewModels()
 
