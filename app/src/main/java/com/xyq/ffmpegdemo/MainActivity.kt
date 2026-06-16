@@ -476,7 +476,7 @@ class MainActivity : AppCompatActivity() {
         mBinding.seekBar.isEnabled = true
         mBinding.seekBar.progress = 0
 
-        mPlayViewModel.updateMuteState(false)
+        mPlayViewModel.updateMuteState(mPlayViewModel.isMute())
         mPlayViewModel.updatePlayState(true)
 
         mExecutors.submit {

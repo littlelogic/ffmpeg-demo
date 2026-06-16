@@ -14,7 +14,7 @@ class PlayViewModel(private val mPlayer: MyPlayer): ViewModel() {
     private var mPlaying = false
 
     init {
-        updateMuteState(false)
+        updateMuteState(mPlayer.isMute())
     }
 
     fun getMuteState() = mMuteLiveData
