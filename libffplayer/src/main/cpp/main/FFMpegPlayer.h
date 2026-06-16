@@ -237,6 +237,15 @@ private:
     /** @brief PAUSE 状态下 seek 后读包，直到解码并渲染一帧视频（不读音频） */
     void prefetchPauseVideoFrame();
 
+    /** @brief 是否已设置有效播放范围（start/end 均 >= 0） */
+    bool hasPlayLimit() const;
+
+    /** @brief 当前播放位置（秒）；无 decoder 时返回 0 */
+    double getCurrentPositionS() const;
+
+    /** @brief 当前位置是否在播放范围内 */
+    bool isPositionInPlayLimit(double posS) const;
+
     /** @brief 将 seek 目标钳位到播放范围内 */
     double clampSeekTime(double timeS) const;
 

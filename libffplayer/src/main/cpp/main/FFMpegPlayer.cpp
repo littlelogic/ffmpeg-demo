@@ -242,9 +242,13 @@ void FFMpegPlayer::start() {
     if (mPlayerState != PlayerState::PREPARE) {  // prepared failed
         return;
     }
-    // 这里才真正"起跑"主时钟：把锚点设到 (mediaTime=0, sys=now)，nowMs 开始随系统时间外推。
+    // 这里才真正"起跑"主时钟：有播放范围时锚点对齐到 limitStart，避免与 demuxer 首帧错位。
     if (mMediaClock) {
-        mMediaClock->seekTo(0);
+        int64_t anchorMs = 0;
+        if (hasPlayLimit()) {
+            anchorMs = (int64_t) (mPlayLimitStartS.load() * 1000.0);
+        }
+        mMediaClock->seekTo(anchorMs);
     }
     updatePlayerState(PlayerState::START);
     if (mReadPacketThread == nullptr) {
@@ -257,6 +261,17 @@ void FFMpegPlayer::start() {
  * @details 恢复主时钟（把锚点平移到 now，保证 nowMs 连续），状态置为 PLAYING，唤醒等待线程。
  */
 void FFMpegPlayer::resume() {
+    // 片段已结束或当前位置越界时，从 limitStart 重新播放，避免 demuxer 仍在 end 之后继续读包。
+    if (hasPlayLimit()) {
+        double limitStart = mPlayLimitStartS.load();
+        bool segmentEnded = mPlayCompletedNotified.load();
+        if (segmentEnded || !isPositionInPlayLimit(getCurrentPositionS())) {
+            LOGI("resume with play limit: replay from start=%f segmentEnded=%d",
+                 limitStart, segmentEnded)
+            seekAndPlay(limitStart);
+            return;
+        }
+    }
     if (mMediaClock) {
         mMediaClock->resume();
     }
@@ -373,8 +388,8 @@ void FFMpegPlayer::ReadPacketLoop() {
 
     // 应用预设的播放范围：prepare 前 setPlayLimit 可能未钳位 endTime，此时 duration 已有效。
     normalizeStoredPlayLimit();
-    double limitStart = mPlayLimitStartS.load();
-    if (limitStart > 0) {
+    if (hasPlayLimit()) {
+        double limitStart = mPlayLimitStartS.load();
         LOGI("ReadPacketLoop apply pre-set play limit, seek to start=%f", limitStart)
         applySeekInternal(limitStart, SEEK_AND_PLAY);
     }
@@ -758,13 +773,23 @@ void FFMpegPlayer::VideoDecodeLoop() {
             return;
         }
 
-        double limitEnd = mPlayLimitEndS.load();
-        if (limitEnd >= 0 && mVideoDecoder->getTimestamp() > limitEnd * 1000.0) {
-            if (frame->format == AV_PIX_FMT_MEDIACODEC) {
-                av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
+        if (hasPlayLimit()) {
+            double tsMs = mVideoDecoder->getTimestamp();
+            double limitStart = mPlayLimitStartS.load();
+            double limitEnd = mPlayLimitEndS.load();
+            if (tsMs < limitStart * 1000.0) {
+                if (frame->format == AV_PIX_FMT_MEDIACODEC) {
+                    av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
+                }
+                return;
             }
-            handlePlayLimitEnd(env);
-            return;
+            if (tsMs > limitEnd * 1000.0) {
+                if (frame->format == AV_PIX_FMT_MEDIACODEC) {
+                    av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
+                }
+                handlePlayLimitEnd(env);
+                return;
+            }
         }
 
         // ====== 同步：统一交给 VideoDecoder::avSync(基于 MediaClock) ======
@@ -888,10 +913,17 @@ void FFMpegPlayer::AudioDecodeLoop() {
             if (mPlayerState == PlayerState::PAUSE) {
                 return;
             }
-            double limitEnd = mPlayLimitEndS.load();
-            if (limitEnd >= 0 && mAudioDecoder->getTimestamp() > limitEnd * 1000.0) {
-                handlePlayLimitEnd(env);
-                return;
+            if (hasPlayLimit()) {
+                double tsMs = mAudioDecoder->getTimestamp();
+                double limitStart = mPlayLimitStartS.load();
+                double limitEnd = mPlayLimitEndS.load();
+                if (tsMs < limitStart * 1000.0) {
+                    return;
+                }
+                if (tsMs > limitEnd * 1000.0) {
+                    handlePlayLimitEnd(env);
+                    return;
+                }
             }
             mAudioDecoder->avSync(frame);
             doRender(env, frame);
@@ -1163,12 +1195,35 @@ bool FFMpegPlayer::seekAndPlay(double timeS) {
     return true;
 }
 
-double FFMpegPlayer::clampSeekTime(double timeS) const {
+bool FFMpegPlayer::hasPlayLimit() const {
+    return mPlayLimitStartS.load() >= 0 && mPlayLimitEndS.load() >= 0;
+}
+
+double FFMpegPlayer::getCurrentPositionS() const {
+    if (mAudioDecoder) {
+        return mAudioDecoder->getTimestamp() / 1000.0;
+    }
+    if (mVideoDecoder) {
+        return mVideoDecoder->getTimestamp() / 1000.0;
+    }
+    return 0;
+}
+
+bool FFMpegPlayer::isPositionInPlayLimit(double posS) const {
+    if (!hasPlayLimit()) {
+        return true;
+    }
     double limitStart = mPlayLimitStartS.load();
     double limitEnd = mPlayLimitEndS.load();
-    if (limitStart < 0 || limitEnd < 0) {
+    return posS >= limitStart && posS <= limitEnd;
+}
+
+double FFMpegPlayer::clampSeekTime(double timeS) const {
+    if (!hasPlayLimit()) {
         return timeS;
     }
+    double limitStart = mPlayLimitStartS.load();
+    double limitEnd = mPlayLimitEndS.load();
     if (timeS < limitStart) return limitStart;
     if (timeS > limitEnd) return limitEnd;
     return timeS;
@@ -1196,11 +1251,11 @@ bool FFMpegPlayer::normalizePlayLimit(double *startTimeS, double *endTimeS) {
 }
 
 void FFMpegPlayer::normalizeStoredPlayLimit() {
-    double startTimeS = mPlayLimitStartS.load();
-    double endTimeS = mPlayLimitEndS.load();
-    if (startTimeS < 0 || endTimeS < 0) {
+    if (!hasPlayLimit()) {
         return;
     }
+    double startTimeS = mPlayLimitStartS.load();
+    double endTimeS = mPlayLimitEndS.load();
 
     if (!normalizePlayLimit(&startTimeS, &endTimeS)) {
         LOGW("normalizeStoredPlayLimit invalid range, clearing: start=%f end=%f",
@@ -1238,7 +1293,7 @@ void FFMpegPlayer::setPlayLimit(double startTimeS, double endTimeS) {
         return;
     }
     double curPosS = curPosMs / 1000.0;
-    if (curPosS < startTimeS || curPosS > endTimeS) {
+    if (!isPositionInPlayLimit(curPosS)) {
         LOGI("setPlayLimit current pos %f out of range, seek to start %f", curPosS, startTimeS)
         seek(startTimeS);
     }
