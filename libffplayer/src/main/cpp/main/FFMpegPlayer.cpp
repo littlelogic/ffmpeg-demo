@@ -1289,7 +1289,7 @@ void FFMpegPlayer::setPlayLimit(double startTimeS, double endTimeS) {
     mPlayLimitStartS.store(startTimeS);
     mPlayLimitEndS.store(endTimeS);
 
-    if (mPlayerState < PlayerState::START) {
+    if (mPlayerState < PlayerState::START || mPlayerState >= PlayerState::STOP) {
         return;
     }
 
@@ -1313,6 +1313,12 @@ void FFMpegPlayer::clearPlayLimit() {
     LOGI("clearPlayLimit")
     mPlayLimitStartS.store(-1.0);
     mPlayLimitEndS.store(-1.0);
+    mPlayCompletedNotified.store(false);
+    {
+        std::lock_guard<std::mutex> lk(mEofMutex);
+        mVideoStreamEnded = false;
+        mAudioStreamEnded = false;
+    }
 }
 
 void FFMpegPlayer::handlePlayLimitEnd(JNIEnv *env) {
