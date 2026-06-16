@@ -246,11 +246,12 @@ void FFMpegPlayer::start() {
     // 否则锚点对齐到 limitStart，避免与 demuxer 首帧错位。
     if (mMediaClock) {
         int64_t anchorMs = 0;
-        if (hasPlayLimit()) {
+        double limitStart = -1.0;
+        double limitEnd = -1.0;
+        if (getPlayLimit(&limitStart, &limitEnd)) {
             double currentPosS = getCurrentPositionS();
-            double anchorS = isPositionInPlayLimit(currentPosS)
-                             ? currentPosS
-                             : mPlayLimitStartS.load();
+            double anchorS = (currentPosS >= limitStart && currentPosS <= limitEnd)
+                             ? currentPosS : limitStart;
             anchorMs = (int64_t) (anchorS * 1000.0);
         }
         mMediaClock->seekTo(anchorMs);
@@ -267,10 +268,12 @@ void FFMpegPlayer::start() {
  */
 void FFMpegPlayer::resume() {
     // 片段已结束或当前位置越界时，从 limitStart 重新播放，避免 demuxer 仍在 end 之后继续读包。
-    if (hasPlayLimit()) {
-        double limitStart = mPlayLimitStartS.load();
+    double limitStart = -1.0;
+    double limitEnd = -1.0;
+    if (getPlayLimit(&limitStart, &limitEnd)) {
         bool segmentEnded = mPlayCompletedNotified.load();
-        if (segmentEnded || !isPositionInPlayLimit(getCurrentPositionS())) {
+        double currentPosS = getCurrentPositionS();
+        if (segmentEnded || currentPosS < limitStart || currentPosS > limitEnd) {
             LOGI("resume with play limit: replay from start=%f segmentEnded=%d",
                  limitStart, segmentEnded)
             seekAndPlay(limitStart);
@@ -393,10 +396,11 @@ void FFMpegPlayer::ReadPacketLoop() {
 
     // 应用预设的播放范围：prepare 前 setPlayLimit 可能未钳位 endTime，此时 duration 已有效。
     normalizeStoredPlayLimit();
-    if (hasPlayLimit()) {
+    double limitStart = -1.0;
+    double limitEnd = -1.0;
+    if (getPlayLimit(&limitStart, &limitEnd)) {
         double currentPosS = getCurrentPositionS();
-        if (!haveNewSeekPoint() && !isPositionInPlayLimit(currentPosS)) {
-            double limitStart = mPlayLimitStartS.load();
+        if (!haveNewSeekPoint() && (currentPosS < limitStart || currentPosS > limitEnd)) {
             LOGI("ReadPacketLoop apply pre-set play limit, current=%f out of range, seek to start=%f",
                  currentPosS, limitStart)
             // 这是 start() 流程里的范围校正，校正后应该继续播放；不是普通 seek。普通用户 seek 仍然走 seek() / SEEK_DEFAULT，保持原状态
@@ -783,10 +787,10 @@ void FFMpegPlayer::VideoDecodeLoop() {
             return;
         }
 
-        if (hasPlayLimit()) {
+        double limitStart = -1.0;
+        double limitEnd = -1.0;
+        if (getPlayLimit(&limitStart, &limitEnd)) {
             double tsMs = mVideoDecoder->getTimestamp();
-            double limitStart = mPlayLimitStartS.load();
-            double limitEnd = mPlayLimitEndS.load();
             if (tsMs < limitStart * 1000.0) {
                 if (frame->format == AV_PIX_FMT_MEDIACODEC) {
                     av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
@@ -923,10 +927,10 @@ void FFMpegPlayer::AudioDecodeLoop() {
             if (mPlayerState == PlayerState::PAUSE) {
                 return;
             }
-            if (hasPlayLimit()) {
+            double limitStart = -1.0;
+            double limitEnd = -1.0;
+            if (getPlayLimit(&limitStart, &limitEnd)) {
                 double tsMs = mAudioDecoder->getTimestamp();
-                double limitStart = mPlayLimitStartS.load();
-                double limitEnd = mPlayLimitEndS.load();
                 if (tsMs < limitStart * 1000.0) {
                     return;
                 }
@@ -1206,7 +1210,38 @@ bool FFMpegPlayer::seekAndPlay(double timeS) {
 }
 
 bool FFMpegPlayer::hasPlayLimit() const {
-    return mPlayLimitStartS.load() >= 0 && mPlayLimitEndS.load() >= 0;
+    return getPlayLimit(nullptr, nullptr);
+}
+
+bool FFMpegPlayer::getPlayLimit(double *startTimeS, double *endTimeS) const {
+    for (;;) {
+        uint64_t versionBefore = mPlayLimitVersion.load();
+        if ((versionBefore & 1U) != 0) {
+            continue;
+        }
+
+        double start = mPlayLimitStartS.load();
+        double end = mPlayLimitEndS.load();
+        uint64_t versionAfter = mPlayLimitVersion.load();
+        if (versionBefore != versionAfter || (versionAfter & 1U) != 0) {
+            continue;
+        }
+
+        if (startTimeS != nullptr) {
+            *startTimeS = start;
+        }
+        if (endTimeS != nullptr) {
+            *endTimeS = end;
+        }
+        return start >= 0 && end >= 0;
+    }
+}
+
+void FFMpegPlayer::storePlayLimit(double startTimeS, double endTimeS) {
+    mPlayLimitVersion.fetch_add(1);
+    mPlayLimitStartS.store(startTimeS);
+    mPlayLimitEndS.store(endTimeS);
+    mPlayLimitVersion.fetch_add(1);
 }
 
 double FFMpegPlayer::getCurrentPositionS() const {
@@ -1220,20 +1255,20 @@ double FFMpegPlayer::getCurrentPositionS() const {
 }
 
 bool FFMpegPlayer::isPositionInPlayLimit(double posS) const {
-    if (!hasPlayLimit()) {
+    double limitStart = -1.0;
+    double limitEnd = -1.0;
+    if (!getPlayLimit(&limitStart, &limitEnd)) {
         return true;
     }
-    double limitStart = mPlayLimitStartS.load();
-    double limitEnd = mPlayLimitEndS.load();
     return posS >= limitStart && posS <= limitEnd;
 }
 
 double FFMpegPlayer::clampSeekTime(double timeS) const {
-    if (!hasPlayLimit()) {
+    double limitStart = -1.0;
+    double limitEnd = -1.0;
+    if (!getPlayLimit(&limitStart, &limitEnd)) {
         return timeS;
     }
-    double limitStart = mPlayLimitStartS.load();
-    double limitEnd = mPlayLimitEndS.load();
     if (timeS < limitStart) return limitStart;
     if (timeS > limitEnd) return limitEnd;
     return timeS;
@@ -1261,11 +1296,11 @@ bool FFMpegPlayer::normalizePlayLimit(double *startTimeS, double *endTimeS) {
 }
 
 void FFMpegPlayer::normalizeStoredPlayLimit() {
-    if (!hasPlayLimit()) {
+    double startTimeS = -1.0;
+    double endTimeS = -1.0;
+    if (!getPlayLimit(&startTimeS, &endTimeS)) {
         return;
     }
-    double startTimeS = mPlayLimitStartS.load();
-    double endTimeS = mPlayLimitEndS.load();
 
     if (!normalizePlayLimit(&startTimeS, &endTimeS)) {
         LOGW("normalizeStoredPlayLimit invalid range, clearing: start=%f end=%f",
@@ -1274,8 +1309,7 @@ void FFMpegPlayer::normalizeStoredPlayLimit() {
         return;
     }
 
-    mPlayLimitStartS.store(startTimeS);
-    mPlayLimitEndS.store(endTimeS);
+    storePlayLimit(startTimeS, endTimeS);
 }
 
 void FFMpegPlayer::setPlayLimit(double startTimeS, double endTimeS) {
@@ -1286,8 +1320,7 @@ void FFMpegPlayer::setPlayLimit(double startTimeS, double endTimeS) {
     }
 
     LOGI("setPlayLimit start=%f end=%f duration=%f", startTimeS, endTimeS, getDuration())
-    mPlayLimitStartS.store(startTimeS);
-    mPlayLimitEndS.store(endTimeS);
+    storePlayLimit(startTimeS, endTimeS);
 
     if (mPlayerState < PlayerState::START || mPlayerState >= PlayerState::STOP) {
         return;
@@ -1311,10 +1344,8 @@ void FFMpegPlayer::setPlayLimit(double startTimeS, double endTimeS) {
 
 void FFMpegPlayer::clearPlayLimit() {
     LOGI("clearPlayLimit")
-    mPlayLimitStartS.store(-1.0);
-    mPlayLimitEndS.store(-1.0);
-    mPlayCompletedNotified.store(false);
     bool hadPlayLimit = hasPlayLimit();
+    storePlayLimit(-1.0, -1.0);
     if (hadPlayLimit) {
         mPlayCompletedNotified.store(false);
         std::lock_guard<std::mutex> lk(mEofMutex);

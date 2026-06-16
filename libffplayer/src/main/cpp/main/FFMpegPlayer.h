@@ -16,6 +16,7 @@
 #include <string>
 #include <sstream>
 #include <ctime>
+#include <cstdint>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -158,6 +159,8 @@ private:
     std::atomic<bool> mPauseVideoPreviewRendered{false}; ///< PAUSE 预取预览是否已渲染至少一帧视频
 
     // 播放范围限制（秒），-1 表示无限制。UI 线程设置，解码线程读取。
+    // version 用于成对发布 start/end：奇数表示正在写，偶数表示稳定可读。
+    std::atomic<uint64_t> mPlayLimitVersion{0};
     std::atomic<double> mPlayLimitStartS{-1.0};
     std::atomic<double> mPlayLimitEndS{-1.0};
 
@@ -239,6 +242,12 @@ private:
 
     /** @brief 是否已设置有效播放范围（start/end 均 >= 0） */
     bool hasPlayLimit() const;
+
+    /** @brief 获取一致的播放范围快照；返回 false 表示未设置播放范围 */
+    bool getPlayLimit(double *startTimeS, double *endTimeS) const;
+
+    /** @brief 成对发布播放范围 */
+    void storePlayLimit(double startTimeS, double endTimeS);
 
     /** @brief 当前播放位置（秒）；无 decoder 时返回 0 */
     double getCurrentPositionS() const;
