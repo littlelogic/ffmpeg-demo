@@ -1,4 +1,5 @@
 # FFMpeg Demo
+现在这个是完整的
 
 基于FFMpeg6.0版本的学习型Demo，通过FFMpeg提供的硬解(MediaCodec)和软解两种方式进行音视频文件的渲染和播放(滤镜效果包括：灰度滤镜和圆角滤镜)
 

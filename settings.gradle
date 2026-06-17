@@ -44,6 +44,10 @@ if (true) {
 }
 
 
+if (false) {
+    //include ':PermissionX'
+}
+
 include ':libutils'
 include ':libbase'
 include ':libpng'
@@ -55,7 +59,7 @@ include ':libmediapicker'
 include ':app'
 include ':libjpeg'
 
-include ':PermissionX'
+
 
 
 
