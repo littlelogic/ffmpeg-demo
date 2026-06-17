@@ -1,16 +1,18 @@
 package com.xyq.ffmpegdemo.adapter
 
 import android.content.Context
+import android.util.DisplayMetrics
 import android.util.Log
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.recyclerview.widget.RecyclerView
 import com.xyq.ffmpegdemo.R
 import com.xyq.ffmpegdemo.entity.Thumbnail
-import com.xyq.libmediapicker.utils.ScreenUtils
 
 class ThumbnailAdapter(
     private val context: Context,
@@ -21,9 +23,52 @@ class ThumbnailAdapter(
         private const val TAG = "ThumbnailAdapter"
     }
 
+
+    /**
+     * 获得屏幕高度
+     *
+     * @param context
+     * @return
+     */
+    fun getScreenHeight(context: Context): Int {
+        val wm = context
+            .getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val outMetrics = DisplayMetrics()
+        wm.getDefaultDisplay().getMetrics(outMetrics)
+        return outMetrics.heightPixels
+    }
+
+    /**
+     * 获得屏幕宽度
+     *
+     * @param context
+     * @return
+     */
+    fun getScreenWidth(context: Context): Int {
+        val wm = context
+            .getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val outMetrics = DisplayMetrics()
+        wm.getDefaultDisplay().getMetrics(outMetrics)
+        return outMetrics.widthPixels
+    }
+
+    /**
+     * dp转px
+     *
+     * @param context
+     * @param dpVal
+     * @return
+     */
+    fun dp2px(context: Context, dpVal: Float): Int {
+        return TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            dpVal, context.getResources().getDisplayMetrics()
+        ).toInt()
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MyViewHolder {
-        val width = ScreenUtils.getScreenWidth(context) / 5
-        val height = ScreenUtils.dp2px(context, 60f)
+        val width = getScreenWidth(context) / 5
+        val height = dp2px(context, 60f)
         return MyViewHolder(LayoutInflater.from(parent.context).inflate(R.layout.thumbnail_item, parent, false), width, height)
     }
 

@@ -42,9 +42,6 @@ import com.xyq.ffmpegdemo.viewmodel.PlayViewModel
 import com.xyq.ffmpegdemo.viewmodel.VideoThumbnailViewModel
 import com.xyq.libffplayer.ui.MediaInfoDialogHelper
 import com.xyq.libffplayer.utils.FFMpegUtils
-import com.xyq.libmediapicker.MediaPickerActivity
-import com.xyq.libmediapicker.PickerConfig
-import com.xyq.libmediapicker.entity.Media
 import com.xyq.librender.filter.GreyFilter
 import com.xyq.libutils.CommonUtils
 import com.xyq.libutils.FileUtils
@@ -79,14 +76,14 @@ class MainActivity : AppCompatActivity() {
 
     private val mLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == PickerConfig.RESULT_CODE) {
+            /*if (result.resultCode == PickerConfig.RESULT_CODE) {
                 Log.i(TAG, "select media file done")
                 val select = result.data?.getParcelableArrayListExtra<Media>(PickerConfig.EXTRA_RESULT)
                 if (select.isNullOrEmpty()) return@registerForActivityResult
                 val media = select[0]
                 mMediaFilePath = media.path
                 mIsVideo = media.isVideo() or media.isGif()
-            }
+            }*/
         }
 
     private val permissionLauncher = registerForActivityResult<Array<String>, Map<String, Boolean>>(
@@ -130,12 +127,12 @@ class MainActivity : AppCompatActivity() {
 
     fun loadVideo(){
 
-        if (false) {
+       /* if (false) {
             val intent = Intent(this, MediaPickerActivity::class.java)
             intent.putExtra(PickerConfig.SELECT_MODE, PickerConfig.PICKER_IMAGE_VIDEO)
             intent.putExtra(PickerConfig.MAX_SELECT_COUNT, 1)
             mLauncher.launch(intent)
-        }
+        }*/
 
 
 

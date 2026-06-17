@@ -148,6 +148,9 @@ class MyPlayer(private val mContext: Context,
 
     override fun prepare(path: String, config: PlayerConfig, isVideo: Boolean) {
         Log.i(TAG, "prepare: $path, isVideo: $isVideo")
+        if (!isVideo) {
+            throw IllegalArgumentException("Non-video processing is not supported. ")
+        }
         if (path.isEmpty()) {
             throw IllegalArgumentException("Path cannot be empty")
         }

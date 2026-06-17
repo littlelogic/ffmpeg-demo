@@ -44,18 +44,31 @@ if (true) {
 }
 
 
+if (false) {
+    //include ':PermissionX'
+
+    include ':libcamerakit'
+    project(':libcamerakit').projectDir = new File('libraries/libcamerakit')
+
+    include ':libmediapicker'
+    project(':libmediapicker').projectDir = new File('libraries/libmediapicker')
+
+}
+
+
+
+
 include ':libutils'
 include ':libbase'
 include ':libpng'
 include ':librender'
 include ':libffplayer'
 include ':libhwplayer'
-include ':libcamerakit'
-include ':libmediapicker'
+
 include ':app'
 include ':libjpeg'
 
-include ':PermissionX'
+
 
 
 
