@@ -26,11 +26,6 @@ set(nlohmann_dir ${CMAKE_SOURCE_DIR}/vendor/nlohmann)
 add_library(jwfflib SHARED IMPORTED)
 set_target_properties(jwfflib PROPERTIES IMPORTED_LOCATION ${prebuilt_lib_dir}/libjwfflib.so)
 
-# --- Static imported library (libyuv) ---
-
-add_library(yuv STATIC IMPORTED)
-set_target_properties(yuv PROPERTIES IMPORTED_LOCATION ${static_lib_dir}/libyuv.a)
-
 # --- Main shared library ---
 
 add_library(
@@ -91,13 +86,8 @@ set(VERSION_SCRIPT ${CMAKE_SOURCE_DIR}/jwplayer.version)
 target_link_libraries(
         jwplayer
 
-        # FFmpeg (pre-built shared library)
+        # FFmpeg + libyuv (pre-built shared library)
         jwfflib
-
-        # libyuv (static)
-        -Wl,--whole-archive
-        yuv
-        -Wl,--no-whole-archive
 
         -Wl,--exclude-libs,ALL
         -Wl,--version-script=${VERSION_SCRIPT}
