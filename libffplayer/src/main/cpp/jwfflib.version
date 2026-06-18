@@ -1,0 +1,13 @@
+{
+  global:
+    av_*;
+    avutil_*;
+    avcodec_*;
+    avformat_*;
+    avfilter_*;
+    sws_*;
+    swr_*;
+    avio_*;
+  local:
+    *;
+};

@@ -1,0 +1,7 @@
+{
+  global:
+    JNI_OnLoad;
+    Java_com_xyq_libffplayer_*;
+  local:
+    *;
+};

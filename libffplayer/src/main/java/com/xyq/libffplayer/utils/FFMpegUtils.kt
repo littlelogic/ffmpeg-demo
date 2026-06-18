@@ -7,7 +7,7 @@ import java.nio.ByteOrder
 object FFMpegUtils {
 
     init {
-        System.loadLibrary("ffplayer")
+        System.loadLibrary("jwplayer")
     }
 
     interface VideoFrameArrivedInterface {

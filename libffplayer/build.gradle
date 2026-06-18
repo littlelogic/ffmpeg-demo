@@ -15,12 +15,13 @@ android {
         consumerProguardFiles "consumer-rules.pro"
         externalNativeBuild {
             cmake {
-                cppFlags ''
+                cppFlags '-fvisibility=hidden -fvisibility-inlines-hidden'
+                arguments '-DANDROID_STL=c++_static'
             }
         }
         ndk {
             //noinspection ChromeOsAbiSupport
-            abiFilters 'armeabi-v7a', 'arm64-v8a'
+            abiFilters 'arm64-v8a'
         }
     }
 
@@ -37,13 +38,18 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
+    sourceSets {
+        main {
+            jniLibs.srcDirs = []
+        }
+    }
     externalNativeBuild {
         cmake {
             path file('src/main/cpp/CMakeLists.txt')
             version '3.18.1'
         }
     }
-    ndkVersion '21.4.7075529'
+    ndkVersion '28.2.13676358'
 }
 
 dependencies {

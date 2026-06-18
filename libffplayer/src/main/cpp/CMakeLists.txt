@@ -1,95 +1,42 @@
-# For more information about using CMake with Android Studio, read the
-# documentation: https://d.android.com/studio/projects/add-native-code.html
-
-# Sets the minimum version of CMake required to build the native library.
-
 cmake_minimum_required(VERSION 3.18.1)
 
-# Declares and names the project.
+project("jwplayer")
 
-project("ffplayer")
-
-message("build ffplayer shared library")
 message("CMAKE_ANDROID_ARCH_ABI: ${CMAKE_ANDROID_ARCH_ABI}")
 
-# ffmpeg
-set(ffmpeg_lib_dir ${CMAKE_SOURCE_DIR}/../libs/${CMAKE_ANDROID_ARCH_ABI})
+# pre-built libs directory
+set(prebuilt_lib_dir ${CMAKE_SOURCE_DIR}/../libs/${CMAKE_ANDROID_ARCH_ABI})
+
+# static libs directory
+set(static_lib_dir ${CMAKE_SOURCE_DIR}/../staticlibs/${CMAKE_ANDROID_ARCH_ABI})
+
+# ffmpeg headers
 set(ffmpeg_head_dir ${CMAKE_SOURCE_DIR}/vendor/ffmpeg)
 include_directories(${ffmpeg_head_dir})
 
-# libyuv
-set(libyuv_lib_dir ${CMAKE_SOURCE_DIR}/../libs/${CMAKE_ANDROID_ARCH_ABI})
+# libyuv headers
 set(libyuv_head_dir ${CMAKE_SOURCE_DIR}/vendor/libyuv)
 include_directories(${libyuv_head_dir}/libyuv.h)
 
-# nlohmann
+# nlohmann (header-only)
 set(nlohmann_dir ${CMAKE_SOURCE_DIR}/vendor/nlohmann)
 
-# Creates and names a library, sets it as either STATIC
-# or SHARED, and provides the relative paths to its source code.
-# You can define multiple libraries, and CMake builds them for you.
-# Gradle automatically packages shared libraries with your APK.
+# --- Pre-built shared library (FFmpeg merged) ---
+
+add_library(jwfflib SHARED IMPORTED)
+set_target_properties(jwfflib PROPERTIES IMPORTED_LOCATION ${prebuilt_lib_dir}/libjwfflib.so)
+
+# --- Static imported library (libyuv) ---
+
+add_library(yuv STATIC IMPORTED)
+set_target_properties(yuv PROPERTIES IMPORTED_LOCATION ${static_lib_dir}/libyuv.a)
+
+# --- Main shared library ---
 
 add_library(
-        avutil
-        SHARED
-        IMPORTED
-)
-set_target_properties(avutil
-        PROPERTIES IMPORTED_LOCATION
-        ${ffmpeg_lib_dir}/libavutil.so)
-
-add_library( swresample
-        SHARED
-        IMPORTED )
-set_target_properties( swresample
-        PROPERTIES IMPORTED_LOCATION
-        ${ffmpeg_lib_dir}/libswresample.so )
-
-add_library( avcodec
-        SHARED
-        IMPORTED )
-set_target_properties( avcodec
-        PROPERTIES IMPORTED_LOCATION
-        ${ffmpeg_lib_dir}/libavcodec.so )
-
-add_library( avfilter
-        SHARED
-        IMPORTED)
-set_target_properties( avfilter
-        PROPERTIES IMPORTED_LOCATION
-        ${ffmpeg_lib_dir}/libavfilter.so )
-
-add_library( swscale
-        SHARED
-        IMPORTED)
-set_target_properties( swscale
-        PROPERTIES IMPORTED_LOCATION
-        ${ffmpeg_lib_dir}/libswscale.so )
-
-add_library( avformat
-        SHARED
-        IMPORTED)
-set_target_properties( avformat
-        PROPERTIES IMPORTED_LOCATION
-        ${ffmpeg_lib_dir}/libavformat.so )
-
-add_library(
-        yuv
-        SHARED
-        IMPORTED
-)
-set_target_properties(yuv
-        PROPERTIES IMPORTED_LOCATION
-        ${libyuv_lib_dir}/libyuv.so)
-
-add_library( # Sets the name of the library.
-        ffplayer
-
-        # Sets the library as a shared library.
+        jwplayer
         SHARED
 
-        # Provides a relative path to your source file(s).
         ${nlohmann_dir}/json.hpp
 
         ./decoder/BaseDecoder.cpp
@@ -117,25 +64,11 @@ add_library( # Sets the name of the library.
         main/FFMpegPlayer.cpp
         main/MediaClock.cpp
         native-lib.cpp
-        )
+)
 
-# Searches for a specified prebuilt library and stores the path as a
-# variable. Because CMake includes system libraries in the search path by
-# default, you only need to specify the name of the public NDK library
-# you want to add. CMake verifies that the library exists before
-# completing its build.
+find_library(log-lib log)
 
-find_library( # Sets the name of the path variable.
-        log-lib
-
-        # Specifies the name of the NDK library that
-        # you want CMake to locate.
-        log)
-
-# Specifies libraries CMake should link to your target library. You
-# can link multiple libraries, such as libraries you define in this
-# build script, prebuilt third-party libraries, or system libraries.
-
+# base_utils header path
 get_filename_component(module_main ${CMAKE_SOURCE_DIR} DIRECTORY)
 get_filename_component(module_src ${module_main} DIRECTORY)
 get_filename_component(module_root ${module_src} DIRECTORY)
@@ -143,26 +76,34 @@ get_filename_component(project_root ${module_root} DIRECTORY)
 message("project_root: ${project_root}")
 set(base_utils_header_root ${project_root}/libutils/src/main/cpp)
 
-target_include_directories(ffplayer PRIVATE
-        # base_utils search path
+target_include_directories(jwplayer PRIVATE
         ${base_utils_header_root}/jni
         ${base_utils_header_root}/utils
-        )
+)
 
-target_link_libraries( # Specifies the target library.
-        ffplayer
+target_compile_options(jwplayer PRIVATE
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden
+)
 
-        # ffmpeg
-        avutil
-        swresample
-        avcodec
-        avfilter
-        swscale
-        avformat
+set(VERSION_SCRIPT ${CMAKE_SOURCE_DIR}/jwplayer.version)
 
-        # libyuv
+target_link_libraries(
+        jwplayer
+
+        # FFmpeg (pre-built shared library)
+        jwfflib
+
+        # libyuv (static)
+        -Wl,--whole-archive
         yuv
+        -Wl,--no-whole-archive
 
-        # system
+        -Wl,--exclude-libs,ALL
+        -Wl,--version-script=${VERSION_SCRIPT}
+        -Wl,-z,max-page-size=16384
+
         android
-        ${log-lib})
+        ${log-lib}
+        m
+)

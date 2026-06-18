@@ -11,7 +11,7 @@ class FFPlayer: IPlayer {
     private var mListener: IPlayerListener? = null
 
     init {
-        System.loadLibrary("ffplayer")
+        System.loadLibrary("jwplayer")
     }
 
     override fun init() {

@@ -13,6 +13,7 @@
 #include "FFVideoReader.h"
 #include "header/Logger.h"
 #include "header/CommonUtils.h"
+#include <cassert>
 #include "../vendor/libyuv/libyuv.h"
 
 extern "C" {
