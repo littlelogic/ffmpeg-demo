@@ -21,6 +21,36 @@
 #include "ScopedUtfChars.h"
 #include "ScopedPrimitiveArray.h"
 
+namespace {
+
+void normalizeOutputSize(FFVideoReader *reader, jint *width, jint *height) {
+    if (reader == nullptr || width == nullptr || height == nullptr) {
+        return;
+    }
+    int videoWidth = reader->getMediaInfo().width;
+    int videoHeight = reader->getMediaInfo().height;
+    if (*width <= 0 && *height <= 0) {
+        *width = videoWidth;
+        *height = videoHeight;
+    } else if (*width > 0 && *height <= 0) {
+        *width += *width % 2;
+        if (*width > videoWidth) {
+            *width = videoWidth;
+        }
+        *height = (jint) (1.0 * (*width) * videoHeight / videoWidth);
+        *height += *height % 2;
+    } else if (*width <= 0) {
+        *height += *height % 2;
+        if (*height > videoHeight) {
+            *height = videoHeight;
+        }
+        *width = (jint) (1.0 * (*height) * videoWidth / videoHeight);
+        *width += *width % 2;
+    }
+}
+
+} // namespace
+
 /**
  * @brief 批量视频抽帧
  * @details 工作流程：
@@ -303,4 +333,130 @@ Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeGetSingleFrame(JNIEnv *env, job
     memset(buffer, 0, byteCount);
     reader->getFrame((double) timestamp_sec, width, height, buffer, (bool) precise);
     return jByteBuffer;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_xyq_libffplayer_utils_FFMpegUtils_nativeGetVideoFramesInRange(
+        JNIEnv *env,
+        jobject thiz,
+        jstring path,
+        jdouble start_sec,
+        jdouble end_sec,
+        jint width,
+        jint height,
+        jobject cb) {
+    if (path == nullptr || cb == nullptr) {
+        return;
+    }
+
+    jclass utilsClass = env->GetObjectClass(thiz);
+    if (utilsClass == nullptr) {
+        return;
+    }
+    jmethodID allocateFrame = env->GetMethodID(utilsClass, "allocateFrame",
+                                               "(II)Ljava/nio/ByteBuffer;");
+    if (allocateFrame == nullptr) {
+        return;
+    }
+
+    jclass cbClass = env->GetObjectClass(cb);
+    if (cbClass == nullptr) {
+        return;
+    }
+    jmethodID onFetchStart = env->GetMethodID(cbClass, "onFetchStart", "(DIIIZ)V");
+    jmethodID onFrame = env->GetMethodID(cbClass, "onFrame",
+                                         "(Ljava/nio/ByteBuffer;DIIIIZ)Z");
+    jmethodID onFetchEnd = env->GetMethodID(cbClass, "onFetchEnd", "()V");
+    if (onFetchStart == nullptr || onFrame == nullptr || onFetchEnd == nullptr) {
+        return;
+    }
+
+    ScopedUtfChars scopedPath(env, path);
+    std::string sPath = scopedPath.c_str();
+
+    auto *reader = new FFVideoReader();
+    reader->setDiscardType(DISCARD_NONE);
+    if (!reader->init(sPath)) {
+        delete reader;
+        env->CallVoidMethod(cb, onFetchEnd);
+        return;
+    }
+
+    normalizeOutputSize(reader, &width, &height);
+    if (width <= 0 || height <= 0) {
+        reader->release();
+        delete reader;
+        env->CallVoidMethod(cb, onFetchEnd);
+        return;
+    }
+
+    double duration = reader->getDuration();
+    double startSec = (double) start_sec;
+    double endSec = (double) end_sec;
+    if (startSec < 0.0) {
+        startSec = 0.0;
+    }
+    if (duration > 0.0 && endSec > duration) {
+        endSec = duration;
+    }
+    if (endSec < startSec) {
+        reader->release();
+        delete reader;
+        env->CallVoidMethod(cb, onFetchEnd);
+        return;
+    }
+
+    int rotate = reader->getRotate();
+    env->CallVoidMethod(cb, onFetchStart, (jdouble) duration, width, height, rotate, JNI_FALSE);
+    if (env->ExceptionCheck()) {
+        reader->release();
+        delete reader;
+        return;
+    }
+
+    int byteCount = width * height * 4;
+    reader->getFramesInRange(startSec, endSec, [&](AVFrame *frame, double timestampSec, int index) {
+        jobject jByteBuffer = env->CallObjectMethod(thiz, allocateFrame, width, height);
+        if (jByteBuffer == nullptr || env->ExceptionCheck()) {
+            return false;
+        }
+
+        auto *buffer = (uint8_t *) env->GetDirectBufferAddress(jByteBuffer);
+        jlong capacity = env->GetDirectBufferCapacity(jByteBuffer);
+        if (buffer == nullptr || capacity < byteCount) {
+            LOGE("[nativeGetVideoFramesInRange] direct buffer invalid: capacity=%" PRId64 " need=%d",
+                 (int64_t) capacity, byteCount)
+            env->DeleteLocalRef(jByteBuffer);
+            return false;
+        }
+
+        memset(buffer, 0, byteCount);
+        if (!reader->copyFrameToBuffer(frame, width, height, buffer)) {
+            env->DeleteLocalRef(jByteBuffer);
+            return true;
+        }
+
+        jboolean keepGoing = env->CallBooleanMethod(cb,
+                                                    onFrame,
+                                                    jByteBuffer,
+                                                    (jdouble) timestampSec,
+                                                    width,
+                                                    height,
+                                                    rotate,
+                                                    index,
+                                                    JNI_FALSE);
+        env->DeleteLocalRef(jByteBuffer);
+        if (env->ExceptionCheck()) {
+            return false;
+        }
+        return keepGoing == JNI_TRUE;
+    });
+
+    reader->release();
+    delete reader;
+
+    if (!env->ExceptionCheck()) {
+        env->CallVoidMethod(cb, onFetchEnd);
+    }
 }

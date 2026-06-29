@@ -14,7 +14,11 @@
 #define FFMPEGDEMO_FFVIDEOREADER_H
 
 #include "FFReader.h"
+#include "../base/AVPacketQueue.h"
+#include <atomic>
 #include <functional>
+#include <memory>
+#include <thread>
 
 class FFVideoReader: public FFReader {
 
@@ -26,6 +30,8 @@ public:
 
     bool init(std::string &path) override;
 
+    void release();
+
     static int getRotate(AVStream *stream);
 
     int getRotate();
@@ -34,6 +40,14 @@ public:
     void getFrame(double ptsSec, int width, int height, uint8_t *buffer, bool precise = true);
 
     void getNextFrame(const std::function<void(AVFrame *)>& frameArrivedCallback);
+
+    bool getFramesInRange(double startSec,
+                          double endSec,
+                          const std::function<bool(AVFrame *, double, int)>& frameArrivedCallback);
+
+    bool copyFrameToBuffer(AVFrame *frame, int width, int height, uint8_t *buffer);
+
+    double frameTimestampSec(AVFrame *frame) const;
 
     void setSize(int width, int height);
     int getTargetWidth() const { return mTargetWidth; }
@@ -53,6 +67,20 @@ private:
 
     int mTargetWidth = 10;
     int mTargetHeight = 10;
+
+    std::shared_ptr<AVPacketQueue> mPacketQueue = nullptr;
+    std::thread *mReadPacketThread = nullptr;
+    std::atomic<bool> mReadAbort{false};
+    std::atomic<bool> mReadEof{false};
+
+    void ensurePacketQueue();
+    void startReadPacketThread();
+    void stopReadPacketThread(bool clearQueue);
+    void resetPacketPipeline(double ptsSec);
+    void ReadPacketLoop();
+    int readAvPacketToQueue();
+    bool pushPacketToQueue(AVPacket *packet);
+    int popPacketForDecode(AVPacket *packet);
 };
 
 
