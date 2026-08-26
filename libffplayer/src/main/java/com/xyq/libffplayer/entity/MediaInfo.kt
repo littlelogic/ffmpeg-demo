@@ -20,6 +20,9 @@ class MediaInfo(json: String?) {
     var rotate = 0
     var fps = 0
     var frameRate = ""
+    var frameRateMode = ""
+    var avgFps = 0.0
+    var rFps = 0.0
 
     var hasAudio = false
     var audioCodecName = ""
@@ -45,6 +48,9 @@ class MediaInfo(json: String?) {
                     rotate = video.getInt("rotate")
                     fps = video.optDouble("fps", 0.0).roundToInt()
                     frameRate = video.getString("frame_rate")
+                    frameRateMode = video.optString("frame_rate_mode", "")
+                    avgFps = video.optDouble("avg_fps", 0.0)
+                    rFps = video.optDouble("r_fps", 0.0)
                 }
 
                 hasAudio = obj.has("audio")
@@ -69,6 +75,9 @@ class MediaInfo(json: String?) {
                 "rotate=$rotate, " +
                 "fps=$fps, " +
                 "frameRate=$frameRate, " +
+                "frameRateMode=$frameRateMode, " +
+                "avgFps=$avgFps, " +
+                "rFps=$rFps, " +
                 "hasAudio=$hasAudio, audioCodecName='$audioCodecName', channel=$channel, sampleFmt='$sampleFmt', sampleRate=$sampleRate)"
     }
 }

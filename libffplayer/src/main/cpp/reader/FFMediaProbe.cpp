@@ -6,6 +6,7 @@
 #include "FFMediaProbe.h"
 #include "FFVideoReader.h"
 #include "header/Logger.h"
+#include <cmath>
 
 extern "C" {
 #include "libavformat/avformat.h"
@@ -60,6 +61,19 @@ void ff_fill_video_media_info_json(nlohmann::json &v, AVFormatContext *ic, int s
         v["fps"] = 0.0;
     }
     v["frame_rate"] = std::to_string(fr.num) + ":" + std::to_string(fr.den);
+
+    // 轻量启发式判定 CFR/VFR：比较平均帧率与基础帧率，一致为恒定帧率，否则可变帧率
+    AVRational avg = stream->avg_frame_rate;
+    AVRational rfr = stream->r_frame_rate;
+    double avgFps = (avg.num > 0 && avg.den > 0) ? av_q2d(avg) : 0.0;
+    double rFps = (rfr.num > 0 && rfr.den > 0) ? av_q2d(rfr) : 0.0;
+    v["avg_fps"] = avgFps;
+    v["r_fps"] = rFps;
+    if (avgFps > 0.0 && rFps > 0.0) {
+        v["frame_rate_mode"] = (std::fabs(avgFps - rFps) / rFps <= 0.01) ? "CFR" : "VFR";
+    } else {
+        v["frame_rate_mode"] = "unknown";
+    }
 }
 
 void ff_fill_audio_media_info_json(nlohmann::json &a,

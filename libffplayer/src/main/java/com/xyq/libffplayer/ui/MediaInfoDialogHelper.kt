@@ -78,6 +78,13 @@ object MediaInfoDialogHelper {
                 appendLine("编码格式: ${mediaInfo.videoCodecName}")
                 appendLine("分辨率: ${mediaInfo.width} x ${mediaInfo.height}")
                 appendLine("帧率: ${mediaInfo.fps} fps")
+                val frameRateModeText = when (mediaInfo.frameRateMode) {
+                    "CFR" -> "恒定帧率 (CFR)"
+                    "VFR" -> "可变帧率 (VFR)"
+                    else -> "未知"
+                }
+                appendLine("帧率类型: $frameRateModeText")
+                appendLine("平均/基础帧率: ${String.format("%.2f", mediaInfo.avgFps)} / ${String.format("%.2f", mediaInfo.rFps)} fps")
                 appendLine("宽高比: ${mediaInfo.dar}")
                 appendLine("时长: ${String.format("%.2f", mediaInfo.duration)} 秒")
                 appendLine("旋转角度: ${mediaInfo.rotate}°")
