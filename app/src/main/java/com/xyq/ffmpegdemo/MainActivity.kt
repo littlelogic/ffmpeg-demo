@@ -114,7 +114,9 @@ class MainActivity : AppCompatActivity() {
         // preload video thumbnail
         mMediaFilePath = getDemoVideoPath()
 //        mMediaFilePath = "/sdcard/11_media/2-h265.mp4";
-        mMediaFilePath = "/sdcard/11_media/dongbeikanjia1212.mp4";
+//        mMediaFilePath = "/sdcard/11_media/dongbeikanjia1212.mp4";
+        mMediaFilePath = "/storage/emulated/0/11/image_to_video.mp4";
+
         checkPermissionAndRunNext(kotlinx.coroutines.Runnable {
             fetchVideoThumbnail(mMediaFilePath)
         })

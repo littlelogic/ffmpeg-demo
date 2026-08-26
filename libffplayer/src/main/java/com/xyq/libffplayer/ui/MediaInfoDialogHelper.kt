@@ -1,6 +1,15 @@
 package com.xyq.libffplayer.ui
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.method.LinkMovementMethod
+import android.text.style.ClickableSpan
+import android.view.View
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import com.xyq.libffplayer.entity.MediaInfo
@@ -103,10 +112,32 @@ object MediaInfoDialogHelper {
     }
 
     private fun showDialogInternal(activity: Activity, mediaInfo: MediaInfo) {
-        AlertDialog.Builder(activity)
+        val message = formatMessage(mediaInfo)
+        val spannable = SpannableStringBuilder(message)
+        val path = mediaInfo.path
+        if (path.isNotEmpty()) {
+            val start = message.indexOf(path)
+            if (start >= 0) {
+                spannable.setSpan(object : ClickableSpan() {
+                    override fun onClick(widget: View) {
+                        copyPathToClipboard(activity, path)
+                    }
+                }, start, start + path.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+
+        val dialog = AlertDialog.Builder(activity)
             .setTitle("媒体信息")
-            .setMessage(formatMessage(mediaInfo))
-            .setPositiveButton("确定") { dialog, _ -> dialog.dismiss() }
+            .setMessage(spannable)
+            .setPositiveButton("确定") { d, _ -> d.dismiss() }
             .show()
+        dialog.findViewById<TextView>(android.R.id.message)?.movementMethod =
+            LinkMovementMethod.getInstance()
+    }
+
+    private fun copyPathToClipboard(activity: Activity, path: String) {
+        val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("媒体文件路径", path))
+        Toast.makeText(activity, "已复制路径到剪贴板", Toast.LENGTH_SHORT).show()
     }
 }
