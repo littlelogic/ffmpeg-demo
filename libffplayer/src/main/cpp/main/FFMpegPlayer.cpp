@@ -1337,7 +1337,8 @@ void FFMpegPlayer::setPlayLimit(double startTimeS, double endTimeS) {
     }
     double curPosS = curPosMs / 1000.0;
     if (!isPositionInPlayLimit(curPosS)) {
-        LOGI("setPlayLimit current pos %f out of range, seek to start %f", curPosS, startTimeS)
+        LOGI("setPlayLimit current pos %f out of range, seekAndPause to start %f", curPosS, startTimeS)
+        ///seekAndPause(startTimeS);
         seek(startTimeS);
     }
 }

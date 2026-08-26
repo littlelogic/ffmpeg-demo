@@ -328,6 +328,19 @@ class VideoThumbSliderView @JvmOverloads constructor(
     var startBlank = 0
     val leftList:ArrayList<DrawBean> = ArrayList()
 
+    private fun ensureDrawCellCapacity(requiredCount: Int) {
+        if (requiredCount <= drawThumbCellList.size) return
+        for (i in drawThumbCellList.size until requiredCount) {
+            val id = -(i + 1)
+            val cell = ThumbCell(cellWidth.toFloat(), cellHeight.toFloat(), id)
+            thumbCellList.add(cell)
+            drawThumbCellList.add(cell)
+            oriThumbCellList.add(cell)
+            tmpDrawBean.add(DrawBean(0, 0.0, 0f))
+        }
+        totalShowNum = maxOf(totalShowNum, requiredCount)
+    }
+
     fun changeDrawContent() {
         if (config.durationSec <= 0 || config.gridCellWidthPx <= 0) return
 
@@ -353,7 +366,8 @@ class VideoThumbSliderView @JvmOverloads constructor(
 
         var lastFrameNum = -1
         var startIndex = -1
-        val drawNumber = finalLastIndex - firstIndex + 1
+        val drawNumber = (finalLastIndex - firstIndex + 1).coerceAtLeast(0)
+        ensureDrawCellCapacity(drawNumber)
 
         for (i in firstIndex.. finalLastIndex) {
             startIndex++

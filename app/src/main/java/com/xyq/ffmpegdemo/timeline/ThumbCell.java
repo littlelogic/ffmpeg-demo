@@ -9,6 +9,7 @@ import com.badlogic.utils.ALog;
 
 public class ThumbCell {
 
+    // 占位槽位 id：free() 时复位，避免多个空 cell 共用同一个标记。
     public int oriId = -1;
     public float width;
     public float height;
