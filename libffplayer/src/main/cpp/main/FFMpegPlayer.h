@@ -209,8 +209,9 @@ private:
     /** @brief 读取一个 AVPacket 并分发到对应队列；videoOnly 时仅入视频队列（PAUSE 预览用） */
     int readAvPacketToQueue(bool videoOnly = false);
 
-    /** @brief 将 AVPacket 推入指定队列（阻塞等待队列不满） */
-    bool pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVPacketQueue>& queue) const;
+    /** @brief 按两路缓存水位及总内存限流；false 时 packet 仍由调用者释放 */
+    bool pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVPacketQueue>& queue,
+                           bool videoOnly = false) const;
 
     void ReadPacketLoop();      ///< 读包线程主循环
     void VideoDecodeLoop();     ///< 视频解码线程主循环

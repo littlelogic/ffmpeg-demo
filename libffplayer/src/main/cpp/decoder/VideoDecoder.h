@@ -14,6 +14,7 @@
 
 #include <jni.h>
 #include <functional>
+#include <deque>
 #include <string>
 #include "BaseDecoder.h"
 
@@ -38,6 +39,14 @@ public:
     virtual bool prepare() override;         ///< 准备解码器（含硬件加速配置）
     virtual int decode(AVPacket *packet) override;  ///< 解码视频包
     virtual bool avSync(AVFrame *frame) override;   ///< 音视频同步（返回 false 表示该帧应丢弃）
+    /**
+     * 硬解帧进入有界队列，到播放时刻才提交 Surface，兼容 SurfaceTexture/GL 消费端。
+     * 所有队列操作均在解码线程进行；true 表示已入队或已提交，不能视为屏幕呈现回执。
+     */
+    bool renderMediacodecFrameTimed(AVFrame *frame);
+    bool renderPendingMediacodecFrames(bool drain = false);
+    void setRenderInterruptListener(std::function<bool()> listener);
+    virtual void flush() override;
     virtual int seek(double pos) override;
     virtual void release() override;
 
@@ -71,6 +80,17 @@ private:
     const AVCodec *mVideoCodec = nullptr;    ///< 视频解码器
     AVMediaCodecContext *mMediaCodecContext = nullptr; ///< MediaCodec 上下文
     SwsContext *mSwsContext = nullptr;        ///< 图像格式转换上下文（libswscale）
+
+    struct PendingMediacodecFrame {
+        AVFrame *frame;
+        int64_t ptsMs;
+    };
+    // 少量持有输出槽位，给后续包留出解码空间；不按分辨率分配或复制像素。
+    static constexpr size_t kMaxPendingMediacodecFrames = 3;
+    std::deque<PendingMediacodecFrame> mPendingMediacodecFrames;
+    std::function<bool()> mRenderInterruptListener;
+    bool renderNextMediacodecFrame(bool wait);
+    void clearPendingMediacodecFrames();
 
     void updateTimestamp(AVFrame *frame);     ///< 更新帧时间戳
     bool isBeforePrecisionSeekTarget(int64_t normPtsMs) const;

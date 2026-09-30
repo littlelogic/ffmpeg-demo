@@ -408,17 +408,24 @@ void FFMpegPlayer::ReadPacketLoop() {
         }
     }
 
+    bool inputEnded = false;
     while (mPlayerState != PlayerState::STOP) {
-        if (mPlayerState == PlayerState::PAUSE) {
+        if (mPlayerState == PlayerState::PAUSE || (inputEnded && !haveNewSeekPoint())) {
             LOGW("FFMpegPlayer::ReadPacketLoop wait")
             mMutexObj->wait();
             LOGW("FFMpegPlayer::ReadPacketLoop wakeup")
 
+            if (haveNewSeekPoint()) {
+                inputEnded = false;
+            }
             drainWillSeekPointsList();
             continue;
         }
 
         // 每轮读包前先消费 seek 队列（取最新、合并连击 seek）。
+        if (haveNewSeekPoint()) {
+            inputEnded = false;
+        }
         drainWillSeekPointsList();
 
         // SEEK_AND_PAUSE 会将状态改为 PAUSE，此时不继续读包，回到循环顶部进入 wait。
@@ -431,9 +438,8 @@ void FFMpegPlayer::ReadPacketLoop() {
         bool isEnd = readAvPacketToQueue() != 0;
         if (isEnd) {
             LOGW("read av packet end, mPlayerState: %d", mPlayerState)
-            if (mPlayerState == PlayerState::PLAYING) {
-                updatePlayerState(PlayerState::PAUSE);
-            }
+            // 读包结束不等于播放结束：解码器及待呈现队列仍需继续消费尾部数据。
+            inputEnded = true;
         }
     }
     LOGI("FFMpegPlayer::ReadPacketLoop end")
@@ -620,7 +626,7 @@ void FFMpegPlayer::prefetchPauseVideoFrame() {
     int packetsRead = 0;
     for (; ; packetsRead++) {
         if (packetsRead < kMaxPackets) {
-            if (mPlayerState != PlayerState::PAUSE || mHasAbort) {
+            if (mPlayerState != PlayerState::PAUSE || mHasAbort || haveNewSeekPoint()) {
                 break;
             }
             if (mPauseVideoPreviewRendered.load()) {
@@ -644,11 +650,9 @@ void FFMpegPlayer::prefetchPauseVideoFrame() {
 
 
     if (!mPauseVideoPreviewRendered.load()) {
-        LOGW("[pause-preview] num:%d packetsRead:%d, no frame rendered after %d packets, cancel precision gate"
-             , num,packetsRead,packetsRead)
-        if (mVideoDecoder != nullptr) {
-            mVideoDecoder->cancelPrecisionSeekPending("prefetchPauseVideoFrame");
-        }
+        // 读到 EOF 时，解码队列仍可能有目标帧；由解码线程保留精确过滤并处理剩余包。
+        LOGI("[pause-preview] read finished, awaiting decoder output, rounds=%d packets=%d",
+             num, packetsRead)
     }
 }
 
@@ -665,7 +669,7 @@ int FFMpegPlayer::readAvPacketToQueue(bool videoOnly) {
     bool suc = false;
     if (ret == 0) {
         if (mVideoDecoder && mVideoPacketQueue && avPacket->stream_index == mVideoDecoder->getStreamIndex()) {
-            suc = pushPacketToQueue(avPacket, mVideoPacketQueue);
+            suc = pushPacketToQueue(avPacket, mVideoPacketQueue, videoOnly);
         } else if (!videoOnly && mAudioDecoder && mAudioPacketQueue
                    && avPacket->stream_index == mAudioDecoder->getStreamIndex()) {
             suc = pushPacketToQueue(avPacket, mAudioPacketQueue);
@@ -696,7 +700,7 @@ int FFMpegPlayer::readAvPacketToQueue(bool videoOnly) {
             AVPacket *videoFlushPkt = av_packet_alloc();
             videoFlushPkt->size = 0;
             videoFlushPkt->data = nullptr;
-            if (!pushPacketToQueue(videoFlushPkt, mVideoPacketQueue)) {
+            if (!pushPacketToQueue(videoFlushPkt, mVideoPacketQueue, videoOnly)) {
                 av_packet_free(&videoFlushPkt);
                 av_freep(&videoFlushPkt);
             }
@@ -734,25 +738,35 @@ bool FFMpegPlayer::haveNewSeekPoint() const {
 
 /**
  * @brief 将 AVPacket 推入指定队列
- * @details 如果队列已满，阻塞等待 10ms 直到有空间
+ * @details 单路满不能阻塞另一轨的读包；两路都有缓存或达到总预算时才等待。
  */
-bool FFMpegPlayer::pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVPacketQueue>& queue) const {
+bool FFMpegPlayer::pushPacketToQueue(AVPacket *packet, const std::shared_ptr<AVPacketQueue>& queue,
+                                    bool videoOnly) const {
     if (queue == nullptr) {
         return false;
     }
 
-    while (queue->isFull()) {
-        if (mPlayerState == PlayerState::PAUSE) {
-            if (mPauseVideoPreviewRendered.load()) {
-                {
-                    if (haveNewSeekPoint()) {
-                        return true;
-                    }
-                }
-            }
+    constexpr int64_t kMaxPacketBytes = 16 * 1024 * 1024;
+    constexpr int64_t kMaxPackets = 4096;
+    while (true) {
+        if (mHasAbort || mPlayerState == PlayerState::STOP || haveNewSeekPoint()) {
+            return false;
         }
+        if (videoOnly && mPauseVideoPreviewRendered.load()) {
+            // 保留已读出的这个包，然后让预取循环退出；不能等暂停中的解码器继续消费。
+            break;
+        }
+        auto video = mVideoPacketQueue ? mVideoPacketQueue->getStats() : AVPacketQueue::Stats{};
+        auto audio = mAudioPacketQueue ? mAudioPacketQueue->getStats() : AVPacketQueue::Stats{};
+        bool buffered = (!mVideoPacketQueue || video.full)
+                        && (videoOnly || !mAudioPacketQueue || audio.full);
+        bool budgetFull = video.bytes + audio.bytes >= kMaxPacketBytes
+                          || video.packets + audio.packets >= kMaxPackets;
+        if (!buffered && !budgetFull) {
+            break;
+        }
+        // 预算允许一个正在读取的 packet；不持有队列锁等待另一轨消费。
         queue->wait(10);
-        LOGD("queue is full, wait 10ms, packet index: %d", packet->stream_index)
     }
     queue->push(packet);
     return true;
@@ -781,60 +795,66 @@ void FFMpegPlayer::VideoDecodeLoop() {
         LOGE("[video] AttachCurrentThread")
     }
 
+    mVideoDecoder->setRenderInterruptListener([this] {
+        return mHasAbort || mPlayerState == PlayerState::STOP || mVideoSeekPos.load() >= 0;
+    });
     mVideoDecoder->setOnFrameArrived([this, env](AVFrame *frame) {
         if (mHasAbort || !mVideoDecoder) {
             LOGE("[video] setOnFrameArrived, has abort")
-            return;
-        }
-
-        double limitStart = -1.0;
-        double limitEnd = -1.0;
-        if (getPlayLimit(&limitStart, &limitEnd)) {
-            double tsMs = mVideoDecoder->getTimestamp();
-            if (tsMs < limitStart * 1000.0) {
-                if (frame->format == AV_PIX_FMT_MEDIACODEC) {
-                    av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
-                }
-                return;
-            }
-            if (tsMs > limitEnd * 1000.0) {
-                if (frame->format == AV_PIX_FMT_MEDIACODEC) {
-                    av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
-                }
-                handlePlayLimitEnd(env);
-                return;
-            }
-        }
-
-        // ====== 同步：统一交给 VideoDecoder::avSync(基于 MediaClock) ======
-        bool shouldRender = mVideoDecoder->avSync(frame);
-
-        if (!shouldRender) {
-            // 落后过多 → 丢帧。MediaCodec 路径必须显式归还输出 buffer，否则会耗尽。
-            if (frame->format == AV_PIX_FMT_MEDIACODEC) {
+            if (frame->format == AV_PIX_FMT_MEDIACODEC && frame->data[3] != nullptr) {
                 av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
             }
             return;
         }
 
-        // ====== 滤镜处理 ======
-        AVFrame *finalFrame = nullptr;
-        if (mGridFilter != nullptr) {
-            finalFrame = mGridFilter->process(frame);
-        }
-        if (finalFrame == nullptr) {
-            finalFrame = frame;
+        // ====== 播放区间裁剪 ======
+        double limitStart = -1.0;
+        double limitEnd = -1.0;
+        if (getPlayLimit(&limitStart, &limitEnd)) {
+            double tsMs = mVideoDecoder->getTimestamp();
+            if (tsMs < limitStart * 1000.0) {
+                if (frame->format == AV_PIX_FMT_MEDIACODEC && frame->data[3] != nullptr) {
+                    av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
+                }
+                return;
+            }
+            if (tsMs > limitEnd * 1000.0) {
+                if (frame->format == AV_PIX_FMT_MEDIACODEC && frame->data[3] != nullptr) {
+                    av_mediacodec_release_buffer((AVMediaCodecBuffer *) frame->data[3], 0);
+                }
+                if (mVideoDecoder->renderPendingMediacodecFrames(true)
+                    && mVideoSeekPos.load() < 0 && !mHasAbort) {
+                    handlePlayLimitEnd(env);
+                }
+                return;
+            }
         }
 
-        doRender(env, finalFrame);
+        // 硬解小队列允许继续喂包，到期后才交给 Surface（含 SurfaceTexture）。
+        if (frame->format == AV_PIX_FMT_MEDIACODEC) {
+            if (!mVideoDecoder->renderMediacodecFrameTimed(frame)) {
+                return;  // 丢帧/挡帧，buffer 已在内部归还
+            }
+        } else {
+            // 软解：先同步（sleep），再滤镜，再渲染
+            bool shouldRender = mVideoDecoder->avSync(frame);
+            if (!shouldRender) {
+                return;
+            }
+            AVFrame *finalFrame = nullptr;
+            if (mGridFilter != nullptr) {
+                finalFrame = mGridFilter->process(frame);
+            }
+            if (finalFrame == nullptr) {
+                finalFrame = frame;
+            }
+            doRender(env, finalFrame);
+        }
+
         mVideoDecoder->onPrecisionSeekFrameDisplayed();
 
         if (mPlayerState == PlayerState::PAUSE) {
             mPauseVideoPreviewRendered.store(true);
-            // 目标帧已上屏，丢弃预取阶段队列里剩余的 packet，避免再闪中间帧
-            if (mVideoPacketQueue != nullptr) {
-//                mVideoPacketQueue->clear();
-            }
         }
 
         // 无音轨时，进度由视频驱动回调
@@ -844,6 +864,7 @@ void FFMpegPlayer::VideoDecodeLoop() {
         }
     });
 
+    bool outputEofPending = false;
     while (true) {
         if (mHasAbort) {
             LOGE("[video] has abort...")
@@ -853,11 +874,19 @@ void FFMpegPlayer::VideoDecodeLoop() {
 //        LOGE("260527seek VideoDecodeLoop 11")
         if (mVideoSeekPos.load() >= 0) {
 //            mVideoPacketQueue->clear();
+            outputEofPending = false;
             mVideoDecoder->seek(mVideoSeekPos.load());
             mVideoSeekPos.store(kSeekPosUnset);
             LOGI("clear video queue via seek")
             mMutexObj->wakeUp();
             continue;
+        }
+
+        // 无新包时也要交付已到期的帧；EOF 等待队列清空，避免丢失尾帧。
+        bool outputEmpty = mVideoDecoder->renderPendingMediacodecFrames();
+        if (outputEofPending && outputEmpty && mVideoSeekPos.load() < 0 && !mHasAbort) {
+            outputEofPending = false;
+            handleStreamEof(/*isVideo=*/true, env);
         }
 
 //        LOGE("260527seek VideoDecodeLoop 21")
@@ -888,7 +917,7 @@ void FFMpegPlayer::VideoDecodeLoop() {
                 av_packet_free(&packet);
                 if (ret == AVERROR_EOF) {
                     LOGE("VideoDecodeLoop AVERROR_EOF")
-                    handleStreamEof(/*isVideo=*/true, env);
+                    outputEofPending = true;
                 }
             } else {
                 LOGE("VideoDecodeLoop pop packet failed...")
@@ -1034,6 +1063,7 @@ void FFMpegPlayer::checkStrideAndFill(JNIEnv *env, jbyteArray *component, int wi
  *   FLTP(音频) → 重采样后的 PCM 数据  → 回调 Java
  */
 void FFMpegPlayer::doRender(JNIEnv *env, AVFrame *avFrame) {
+    int64_t lagRenderStartMs = getCurrentTimeMs();  // LAG_PROBE 临时插桩
     if (avFrame->format == AV_PIX_FMT_YUV420P) {
         if (!avFrame->data[0] || !avFrame->data[1] || !avFrame->data[2]) {
             LOGE("doRender failed, no yuv buffer")
@@ -1131,6 +1161,29 @@ void FFMpegPlayer::doRender(JNIEnv *env, AVFrame *avFrame) {
                 env->CallVoidMethod(mPlayerJni.instance, mPlayerJni.onAudioFrameArrived, jByteArray, dataSize, flushRender);
             }
             env->DeleteLocalRef(jByteArray);
+        }
+    }
+
+    // ===== LAG_PROBE 临时插桩：doRender 每秒平均/最大单帧耗时 + 像素格式 =====
+    if (avFrame->format != AV_SAMPLE_FMT_FLTP) {
+        static int sRenderCount = 0;
+        static int64_t sRenderSumMs = 0;
+        static int64_t sRenderMaxMs = 0;
+        static int64_t sRenderLastMs = 0;
+        int64_t nowMs = getCurrentTimeMs();
+        int64_t durMs = nowMs - lagRenderStartMs;
+        sRenderCount++;
+        sRenderSumMs += durMs;
+        if (durMs > sRenderMaxMs) sRenderMaxMs = durMs;
+        if (sRenderLastMs == 0) sRenderLastMs = nowMs;
+        if (nowMs - sRenderLastMs >= 1000) {
+            LOGE("LAG_PROBE doRender 1s: frames=%d avgMs=%.2f maxMs=%lld fmt=%d MEDIACODEC=%d",
+                 sRenderCount, (sRenderCount ? (double) sRenderSumMs / sRenderCount : 0.0),
+                 (long long) sRenderMaxMs, avFrame->format, AV_PIX_FMT_MEDIACODEC)
+            sRenderCount = 0;
+            sRenderSumMs = 0;
+            sRenderMaxMs = 0;
+            sRenderLastMs = nowMs;
         }
     }
 }

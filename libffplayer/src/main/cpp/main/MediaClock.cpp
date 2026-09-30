@@ -6,14 +6,13 @@
 #include "MediaClock.h"
 
 #include <climits>
-#include <sys/time.h>
+#include <chrono>
 
 MediaClock::MediaClock() = default;
 
 int64_t MediaClock::sysNowMs() {
-    struct timeval tv{};
-    gettimeofday(&tv, nullptr);
-    return static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 void MediaClock::reset() {
@@ -93,13 +92,10 @@ void MediaClock::updateVideoClock(int64_t mediaPtsMs) {
     if (mType != SyncType::VIDEO_MASTER) {
         return;
     }
-    if (mPaused) {
-        mAnchorMediaMs = mediaPtsMs;
-        mAnchorSysMs = sys;
-        mPauseFrozenMediaMs = mediaPtsMs;
-        return;
+    // 预解码可以领先播放；运行中的时钟不能被帧 PTS 不断向前拨。
+    if (mPaused || mAnchorSysMs < 0) {
+        setAnchorLocked(mediaPtsMs, sys);
     }
-    setAnchorLocked(mediaPtsMs, sys);
 }
 
 int64_t MediaClock::nowMs() const {

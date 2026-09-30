@@ -11,6 +11,9 @@
  */
 
 #include "VideoDecoder.h"
+#include <algorithm>
+#include <cstring>
+#include <ctime>
 #include "header/Logger.h"
 #include "header/CommonUtils.h"
 #include "../reader/FFVideoReader.h"
@@ -234,6 +237,11 @@ bool VideoDecoder::prepare() {
     mStartTimeMsForSync = -1;     // 初始化同步起始时间
     mRetryReceiveCount = RETRY_RECEIVE_COUNT;  // 初始化重试计数
     LOGI("codec name: %s, format: %s", mVideoCodec->name, av_get_pix_fmt_name(AVPixelFormat(params->format)))
+    // ===== LAG_PROBE 临时插桩：确认走硬解还是软解 =====
+    LOGE("LAG_PROBE decode-path: codec=%s path=%s size=%dx%d srcFmt=%s hw_pix_fmt=%d MEDIACODEC=%d",
+         mVideoCodec->name, (mHwDeviceCtx != nullptr ? "HARDWARE" : "SOFTWARE"),
+         mWidth, mHeight, av_get_pix_fmt_name(AVPixelFormat(params->format)),
+         hw_pix_fmt, AV_PIX_FMT_MEDIACODEC)
 
     // ====== 第九步：收集媒体信息元数据（统一走 FFMediaProbe）======
     mMediaInfoJson.clear();
@@ -380,6 +388,7 @@ int VideoDecoder::decode(AVPacket *avPacket) {
         LOGW("[video] decode sendPoint: %" PRId64 ", receivePoint: %" PRId64 ", receiveCount: %d", sendPoint, receivePoint, receiveCount)
     } while (true);  // 继续接收直到出错或 EOF
 
+    renderPendingMediacodecFrames(isEof && receiveRes == AVERROR_EOF);
     return receiveRes;
 }
 
@@ -618,6 +627,29 @@ bool VideoDecoder::avSync(AVFrame *frame) {
         int64_t now = mMediaClock->nowMs();
         int64_t diff = normPts - now;
 
+        // ===== LAG_PROBE 临时插桩：每秒帧数 / 丢帧数 / diff =====
+        {
+            static int sLagTotal = 0;
+            static int sLagDropped = 0;
+            static int64_t sLagLastMs = 0;
+            static int64_t sLagMaxAbsDiff = 0;
+            sLagTotal++;
+            if (diff < -AV_SYNC_DROP_MS) sLagDropped++;
+            int64_t absDiff = diff < 0 ? -diff : diff;
+            if (absDiff > sLagMaxAbsDiff) sLagMaxAbsDiff = absDiff;
+            int64_t lagNowMs = getCurrentTimeMs();
+            if (sLagLastMs == 0) sLagLastMs = lagNowMs;
+            if (lagNowMs - sLagLastMs >= 1000) {
+                LOGE("LAG_PROBE avSync 1s: frames=%d dropped=%d curDiff=%" PRId64 " maxAbsDiff=%" PRId64 " ms",
+                     sLagTotal, sLagDropped, diff, sLagMaxAbsDiff)
+                sLagTotal = 0;
+                sLagDropped = 0;
+                sLagMaxAbsDiff = 0;
+                sLagLastMs = lagNowMs;
+            }
+        }
+        // ===== LAG_PROBE end =====
+
         // 视频严重落后 → 丢帧（仅正常播放；精确 seek 已由 mPrecisionSeekTargetNormMs 约束）
         if (diff < -AV_SYNC_DROP_MS) {
             LOGW("[video] drop late frame, pts=%" PRId64 " ms, clock=%" PRId64 " ms, diff=%" PRId64 " ms",
@@ -651,6 +683,124 @@ bool VideoDecoder::avSync(AVFrame *frame) {
         av_usleep(sleepMs * 1000);
     }
     return diff >= -AV_SYNC_DROP_MS;
+}
+
+bool VideoDecoder::renderMediacodecFrameTimed(AVFrame *frame) {
+    if (!frame || frame->format != AV_PIX_FMT_MEDIACODEC || !frame->data[3]) {
+        return false;
+    }
+    auto *buf = (AVMediaCodecBuffer *) frame->data[3];
+    int64_t normPts = mCurTimeStampMs - mStreamStartPtsMs;
+
+    if (mRenderInterruptListener && mRenderInterruptListener()) {
+        clearPendingMediacodecFrames();
+        av_mediacodec_release_buffer(buf, 0);
+        return false;
+    }
+    if (mPrecisionSeekOutputPending && isBeforePrecisionSeekTarget(normPts)) {
+        av_mediacodec_release_buffer(buf, 0);
+        return false;
+    }
+
+    // 暂停 seek 的单帧预览不等待；旧的预解码帧不能覆盖预览画面。
+    if (mMediaClock && mMediaClock->isPaused()) {
+        clearPendingMediacodecFrames();
+        int ret = av_mediacodec_release_buffer(buf, 1);
+        if (ret < 0) {
+            LOGE("[video] preview buffer release failed: %d", ret)
+            return false;
+        }
+        if (mMediaClock->getSyncType() == MediaClock::SyncType::VIDEO_MASTER) {
+            mMediaClock->updateVideoClock(normPts);
+        }
+        return true;
+    }
+
+    while (mPendingMediacodecFrames.size() >= kMaxPendingMediacodecFrames) {
+        if (!renderNextMediacodecFrame(true)) {
+            av_mediacodec_release_buffer(buf, 0);
+            return false;
+        }
+    }
+
+    AVFrame *pending = av_frame_clone(frame);
+    if (!pending) {
+        av_mediacodec_release_buffer(buf, 0);
+        return false;
+    }
+    mPendingMediacodecFrames.push_back({pending, normPts});
+    renderPendingMediacodecFrames();
+    return true;
+}
+
+void VideoDecoder::setRenderInterruptListener(std::function<bool()> listener) {
+    mRenderInterruptListener = std::move(listener);
+}
+
+bool VideoDecoder::renderNextMediacodecFrame(bool wait) {
+    while (!mPendingMediacodecFrames.empty()) {
+        if (mRenderInterruptListener && mRenderInterruptListener()) {
+            clearPendingMediacodecFrames();
+            return false;
+        }
+        if (mMediaClock && mMediaClock->isPaused()) {
+            return false;
+        }
+        const auto pending = mPendingMediacodecFrames.front();
+        int64_t nowMs = mMediaClock ? mMediaClock->nowMs()
+                                    : getCurrentTimeMs() - mStartTimeMsForSync;
+        int64_t diff = pending.ptsMs - nowMs;
+        if (diff > 0) {
+            if (!wait) {
+                return false;
+            }
+            // 短等待后重读时钟，及时响应暂停、seek、停止和音频时钟校准。
+            av_usleep(std::min<int64_t>(diff, 5) * 1000);
+            continue;
+        }
+
+        mPendingMediacodecFrames.pop_front();
+        auto *buffer = reinterpret_cast<AVMediaCodecBuffer *>(pending.frame->data[3]);
+        int ret;
+        if (diff < -AV_SYNC_DROP_MS) {
+            ret = av_mediacodec_release_buffer(buffer, 0);
+        } else {
+            // SurfaceTexture 不会替 GL 等待未来时间，只在到期时交付帧。
+            struct timespec ts{};
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            int64_t monoNowNs = static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+            ret = av_mediacodec_render_buffer_at_time(buffer, monoNowNs);
+        }
+        if (ret < 0) {
+            LOGE("[video] timed buffer release failed: %d", ret)
+        }
+        AVFrame *released = pending.frame;
+        av_frame_free(&released);
+        return true;
+    }
+    return false;
+}
+
+bool VideoDecoder::renderPendingMediacodecFrames(bool drain) {
+    while (!mPendingMediacodecFrames.empty()) {
+        if (!renderNextMediacodecFrame(drain)) {
+            break;
+        }
+    }
+    return mPendingMediacodecFrames.empty();
+}
+
+void VideoDecoder::clearPendingMediacodecFrames() {
+    for (auto &pending : mPendingMediacodecFrames) {
+        releaseMediacodecFrameIfNeeded(pending.frame);
+        av_frame_free(&pending.frame);
+    }
+    mPendingMediacodecFrames.clear();
+}
+
+void VideoDecoder::flush() {
+    clearPendingMediacodecFrames();
+    BaseDecoder::flush();
 }
 
 /**
@@ -711,6 +861,7 @@ int VideoDecoder::seek(double pos) {
  * 注意：这个函数在析构函数中会自动调用
  */
 void VideoDecoder::release() {
+    clearPendingMediacodecFrames();
     mFixStartTime = false;
     mStartTimeMsForSync = -1;
     mSeekPos = INT64_MAX;
@@ -810,4 +961,3 @@ AVRational VideoDecoder::getFrameRate() {
     AVStream *stream = mFtx->streams[getStreamIndex()];
     return av_guess_frame_rate(mFtx, stream, nullptr);
 }
-

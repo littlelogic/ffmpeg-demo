@@ -6,7 +6,7 @@
  *  - 统一替换原来音/视频解码器各自维护的 `mStartTimeMsForSync` 锚点。
  *  - 提供三种同步类型，并支持运行时降级：
  *      AUDIO_MASTER  → 以音频实际播放进度为主时钟（推荐，存在音轨时使用）
- *      VIDEO_MASTER  → 以视频帧 PTS 为主时钟（仅当无音频或音轨失败时使用）
+ *      VIDEO_MASTER  → 视频起点对齐后按单调时钟外推（无音频或音轨失败时使用）
  *      EXTERNAL      → 系统时钟外推（无音频且无视频时；或音频暂时不可用的兜底）
  *  - 内部以 (anchorMediaMs, anchorSysMs) 二元组记录锚点；
  *    nowMs() = anchorMediaMs + (sys_now - anchorSysMs)。
@@ -46,7 +46,8 @@ public:
     void updateAudioClock(int64_t mediaPtsMs);
 
     /**
-     * 视频渲染端调用：仅在 SyncType == VIDEO_MASTER 时把当前帧 PTS 设为主时钟锚点。
+     * VIDEO_MASTER 下，仅首次启动或暂停预览时对齐帧 PTS；播放中只记录更新时刻，
+     * 不让预解码进度改变播放速度。Seek 必须使用 seekTo()。
      */
     void updateVideoClock(int64_t mediaPtsMs);
 

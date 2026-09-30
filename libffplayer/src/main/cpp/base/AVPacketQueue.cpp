@@ -13,6 +13,16 @@
 #include <ctime>
 #include "header/Logger.h"
 
+namespace {
+int64_t packetBytes(const AVPacket *packet) {
+    int64_t bytes = sizeof(AVPacket) + packet->size;
+    for (int i = 0; i < packet->side_data_elems; ++i) {
+        bytes += sizeof(AVPacketSideData) + packet->side_data[i].size;
+    }
+    return bytes;
+}
+}
+
 AVPacketQueue::AVPacketQueue(int64_t maxSize) {
     pthread_mutex_init(&mMutex, nullptr);
     pthread_cond_init(&mCond, nullptr);
@@ -29,15 +39,22 @@ AVPacketQueue::~AVPacketQueue() {
 void AVPacketQueue::push(AVPacket *packet) {
     pthread_mutex_lock(&mMutex);
     mQueue.push(packet);
+    mSizeBytes += packetBytes(packet);
     pthread_mutex_unlock(&mMutex);
     notify();
 }
 
 AVPacket * AVPacketQueue::pop() {
     pthread_mutex_lock(&mMutex);
+    if (mQueue.empty()) {
+        pthread_mutex_unlock(&mMutex);
+        return nullptr;
+    }
     AVPacket *packet = mQueue.front();
     mQueue.pop();
+    mSizeBytes -= packetBytes(packet);
     pthread_mutex_unlock(&mMutex);
+    notify();
     return packet;
 }
 
@@ -66,11 +83,21 @@ int AVPacketQueue::popTo(AVPacket *packet) {
         packet->data = nullptr;
     }
 
+    mSizeBytes -= packetBytes(pkt);
     av_packet_free(&pkt);
     av_free(pkt);
     mQueue.pop();
     pthread_mutex_unlock(&mMutex);
+    notify();
     return 0;
+}
+
+AVPacketQueue::Stats AVPacketQueue::getStats() {
+    pthread_mutex_lock(&mMutex);
+    int64_t count = static_cast<int64_t>(mQueue.size());
+    Stats stats{count, mSizeBytes, count >= mMaxSize};
+    pthread_mutex_unlock(&mMutex);
+    return stats;
 }
 
 bool AVPacketQueue::isFull() {
@@ -127,6 +154,7 @@ void AVPacketQueue::clear() {
         }
         mQueue.pop();
     }
+    mSizeBytes = 0;
     pthread_mutex_unlock(&mMutex);
     notify();
 }

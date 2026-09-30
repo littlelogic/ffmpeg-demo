@@ -35,11 +35,19 @@ public:
     bool isFull();                         ///< 是否已满
     bool isEmpty();                        ///< 是否为空
 
+    struct Stats {
+        int64_t packets;
+        int64_t bytes;
+        bool full;
+    };
+    Stats getStats();                      ///< 同一把锁下读取计数和压缩包内存占用
+
     void wait(unsigned int timeOutMs = -1); ///< 等待通知（支持超时）
     void notify();                         ///< 发送通知
 
 private:
     int64_t mMaxSize = INT64_MAX;          ///< 最大容量
+    int64_t mSizeBytes = 0;
     std::queue<AVPacket *> mQueue;         ///< 底层队列
     pthread_cond_t mCond{};                ///< 条件变量
     pthread_mutex_t mMutex{};              ///< 互斥锁
